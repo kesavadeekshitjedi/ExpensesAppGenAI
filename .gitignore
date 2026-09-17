@@ -1,0 +1,23 @@
+# .NET
+bin/
+obj/
+*.user
+
+# Node / React
+node_modules/
+dist/
+build/
+
+# Env / secrets
+.env
+.env.local
+*.env
+
+# Local receipt/item images (never committed)
+**/uploads/
+**/local-images/
+
+# OS / editor
+.vs/
+.vscode/
+*.suo
