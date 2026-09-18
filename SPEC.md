@@ -40,7 +40,7 @@ In phase 1, receipts are photographed by opening the web app in a phone browser,
 | Receipt and item images | **(Proposed)** Azure Blob Storage |
 | Receipt reading (text extraction only) | **(Proposed)** Azure AI Document Intelligence, prebuilt receipt model |
 | Email | **(Proposed)** Azure Communication Services Email or a similar provider |
-| Hosting | Azure, keeping monthly cost low. Web: Azure Static Web Apps (free tier). API: **(Proposed)** App Service or Container Apps, low tier — confirmed when writing Bicep files |
+| Hosting | Azure, keeping monthly cost low. Web: Azure Static Web Apps (free tier). API: Azure Container Apps (consumption, scales to zero) with images in Azure Container Registry (Basic). Region: West US 2 |
 | Source control | Private GitHub repo |
 | CI/CD | GitHub Actions |
 
@@ -250,8 +250,8 @@ The app raises **flags** for spending that deserves a second look. A flag is a s
 |---|---|
 | Resource group | Holds everything for the app |
 | Azure Static Web Apps | React web app |
-| Azure App Service (Linux, low tier) or Container Apps | ASP.NET Core API |
-| Azure SQL Database | App data |
+| Azure Container Apps (consumption) + Container Registry (Basic) | ASP.NET Core API |
+| Azure SQL Database (Basic, 5 DTU; Entra-only sign-in) | App data |
 | Storage account (Blob) | Receipt images and item pictures |
 | Azure AI Document Intelligence | Receipt text extraction |
 | Email service | Alert emails |
@@ -419,3 +419,6 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 | 32 | Web hosting: Azure Static Web Apps (free tier). This does not affect whether a Windows or iOS client can be added later — native/desktop clients call the API directly, not through Static Web Apps (see Open Question #9) |
 | 33 | Target monthly Azure budget: $50–100 |
 | 34 | GitHub repo: https://github.com/kesavadeekshitjedi/ExpensesAppGenAI (private) |
+| 35 | API hosting: Azure Container Apps (consumption, scale to zero; cold starts accepted) |
+| 36 | Azure SQL tier: Basic (5 DTU) |
+| 37 | Azure region: West US 2 |

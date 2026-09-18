@@ -1,0 +1,5 @@
+@Expenses.Api_HostAddress = http://localhost:5080
+
+GET {{Expenses.Api_HostAddress}}/health
+
+###

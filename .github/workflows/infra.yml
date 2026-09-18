@@ -1,0 +1,74 @@
+name: Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'what-if previews changes; apply creates/updates resources'
+        type: choice
+        options:
+          - what-if
+          - apply
+        default: what-if
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-expenses-prod
+  CONTAINER_APP_NAME: ca-expenses-api
+
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Keep whatever image is already running so re-running infra never rolls the API back to the placeholder.
+      - name: Read current API image
+        run: |
+          image=$(az resource show \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-type Microsoft.App/containerApps \
+            --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
+          if [ -n "$image" ]; then
+            echo "Keeping current image: $image"
+            echo "API_IMAGE=$image" >> "$GITHUB_ENV"
+          else
+            echo "No API deployed yet; using placeholder image"
+          fi
+
+      - name: What-if
+        env:
+          SQL_ADMIN_GROUP_ID: ${{ vars.SQL_ADMIN_GROUP_ID }}
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam
+
+      - name: Apply
+        if: inputs.mode == 'apply'
+        env:
+          SQL_ADMIN_GROUP_ID: ${{ vars.SQL_ADMIN_GROUP_ID }}
+        run: |
+          az deployment group create \
+            --name "infra-${{ github.run_number }}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/main.bicepparam \
+            --query properties.outputs -o json
