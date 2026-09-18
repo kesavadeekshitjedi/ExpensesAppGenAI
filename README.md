@@ -30,6 +30,15 @@ The home page shows **API status: healthy** when both are running.
 
 Tests: `dotnet test ExpensesApp.slnx`
 
+## Production
+
+| What | Address |
+|---|---|
+| Web app | https://ashy-desert-0e2b1851e.4.azurestaticapps.net |
+| API | https://ca-expenses-api.ashycliff-08d8073a.westus2.azurecontainerapps.io |
+
+Both run placeholders until the deploy workflow (build step 4) exists. Current values: `az stack group show --name expenses-app --resource-group rg-expenses-prod --query outputs`.
+
 ## Azure setup (one time)
 
 1. `az login`, then run the bootstrap script:
