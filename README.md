@@ -32,12 +32,25 @@ Tests: `dotnet test ExpensesApp.slnx`
 
 ## Azure setup (one time)
 
-1. `az login`, then run the bootstrap script. It creates the resource group, the identity GitHub Actions signs in as, and the SQL admin group:
+1. `az login`, then run the bootstrap script:
    ```powershell
    ./infra/bootstrap.ps1 -SubscriptionId <subscription-id>
    ```
+   It creates two resource groups:
+   - `rg-expenses-bootstrap` holds the identity GitHub Actions signs in as. It is never deleted, so the app can be torn down and rebuilt without losing deploy access.
+   - `rg-expenses-prod` holds the app. The deploy identity can manage everything in it, but can only assign the four roles the templates use.
+
+   It also creates the SQL admin group (you and the deploy identity), plus a small custom role that lets the deploy identity purge deleted Key Vaults and Document Intelligence resources, which `recreate` needs.
 2. In GitHub, go to **Settings > Environments**, create an environment named `production`, and add the four **variables** the script prints (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SQL_ADMIN_GROUP_ID`). None of them are secrets.
 3. In GitHub, go to **Actions > Infrastructure > Run workflow**. Run it with `what-if` first to preview changes, then run it again with `apply`.
+
+### Infrastructure workflow modes
+
+| Mode | What it does |
+|---|---|
+| `what-if` | Preview only. Shows creates and changes, but not deletions. |
+| `apply` | Creates or updates resources through a deployment stack. Resources removed from the templates are deleted. |
+| `recreate` | Deletes every app resource, purges soft-deleted ones, then rebuilds. **All data (database, receipt images) is lost.** Requires typing `DELETE rg-expenses-prod`. After it runs, the API is on the placeholder image until the next deploy. |
 
 The API starts on a placeholder image until the deploy workflow (build step 4) pushes the real one.
 
@@ -59,5 +72,6 @@ Check current Azure pricing before applying; prices change.
 ### Notes
 
 - No passwords or keys are stored anywhere. GitHub signs in with OIDC; the API uses its managed identity for SQL, Storage, Key Vault, and Document Intelligence.
-- Key Vault uses 7-day soft delete. If you delete the resource group and rebuild within 7 days, purge the old vault first (`az keyvault purge --name <name>`).
+- Key Vault and Document Intelligence keep deleted resources for a while and block reusing their names. `recreate` purges them automatically; if you delete the resource group by hand instead, purge them yourself before running `apply`.
+- `recreate` does not back up data yet. Add a database export/import step before using it once there is real data.
 - Only one free (F0) Document Intelligence resource is allowed per subscription. If you already have one, set `documentIntelligenceSku` to `S0` in `infra/main.bicep`.

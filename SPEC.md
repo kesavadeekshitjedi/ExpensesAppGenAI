@@ -248,7 +248,8 @@ The app raises **flags** for spending that deserves a second look. A flag is a s
 ### Azure resources
 | Resource | Purpose |
 |---|---|
-| Resource group | Holds everything for the app |
+| Resource group `rg-expenses-prod` | Holds everything for the app |
+| Resource group `rg-expenses-bootstrap` | Holds only the GitHub deploy identity; never deleted, so the app resource group can be rebuilt |
 | Azure Static Web Apps | React web app |
 | Azure Container Apps (consumption) + Container Registry (Basic) | ASP.NET Core API |
 | Azure SQL Database (Basic, 5 DTU; Entra-only sign-in) | App data |
@@ -258,12 +259,12 @@ The app raises **flags** for spending that deserves a second look. A flag is a s
 | Key Vault | OAuth client secrets, connection strings, API keys |
 | Application Insights | Logs and errors |
 
-All resources are defined in **Bicep** files in the repo (`infra/`) and created or updated by a manually triggered workflow, so the environment can be rebuilt from scratch. **(Proposed)** The exact service choices in the table above (e.g., App Service vs. Container Apps) are confirmed when writing the Bicep files.
+All resources are defined in **Bicep** files in the repo (`infra/`) and created or updated by a manually triggered workflow, so the environment can be rebuilt from scratch. Resources are deployed as an Azure **deployment stack**, so anything removed from the templates is deleted on the next apply. A one-time script (`infra/bootstrap.ps1`) creates the deploy identity, its permissions, and the SQL admin group before the workflow can run.
 
 ### Azure authentication from GitHub
 - GitHub Actions signs in to Azure with **OpenID Connect (federated credentials)** on a Microsoft Entra app registration or managed identity.
 - **No Azure passwords or publish profiles are stored in GitHub.** GitHub only holds non-secret identifiers (tenant ID, subscription ID, client ID).
-- The identity is given the minimum role needed, scoped to the app's resource group.
+- The identity is given the minimum role needed, scoped to the app's resource group: Contributor, plus the right to assign only the specific roles the templates use. At subscription level it has one narrow custom role that only allows purging soft-deleted Key Vaults and Document Intelligence resources (needed by `recreate`).
 - App secrets live in Key Vault; the API reads them through its managed identity.
 
 ### Workflows
@@ -288,8 +289,10 @@ All resources are defined in **Bicep** files in the repo (`infra/`) and created 
 
 **3. Infrastructure — `infra.yml`**
 - Trigger: manual only.
-- Creates or updates the Azure resources from the Bicep files.
-- **(Proposed)** Runs a what-if preview first and shows the planned changes before applying them.
+- Three modes:
+  - `what-if`: preview of creates and changes only.
+  - `apply`: creates or updates resources through the deployment stack; resources removed from the templates are deleted.
+  - `recreate`: deletes every app resource, purges soft-deleted Key Vault and Document Intelligence resources, then rebuilds. Requires typing `DELETE rg-expenses-prod`. **All data is lost**; a database and receipt-image export/import step must be added before this is used with real data.
 
 **4. Mobile (Phase 2)**
 - iOS builds and App Store/TestFlight distribution will be added in phase 2 (e.g., via Expo EAS or Xcode Cloud). Not designed yet.
@@ -422,3 +425,4 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 | 35 | API hosting: Azure Container Apps (consumption, scale to zero; cold starts accepted) |
 | 36 | Azure SQL tier: Basic (5 DTU) |
 | 37 | Azure region: West US 2 |
+| 38 | GitHub deploy identity lives in its own resource group (`rg-expenses-bootstrap`); app infra is deployed as a deployment stack; `infra.yml` has a `recreate` mode (delete and rebuild, with typed confirmation) |

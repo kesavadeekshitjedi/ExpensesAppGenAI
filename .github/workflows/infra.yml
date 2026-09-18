@@ -4,12 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'what-if previews changes; apply creates/updates resources'
+        description: 'what-if = preview only; apply = create/update (removes resources dropped from the templates); recreate = DELETE everything then rebuild'
         type: choice
         options:
           - what-if
           - apply
+          - recreate
         default: what-if
+      confirm:
+        description: 'For recreate only: type DELETE rg-expenses-prod. All app data (database, receipt images) is lost.'
+        type: string
+        required: false
 
 permissions:
   id-token: write
@@ -21,6 +26,7 @@ concurrency:
 
 env:
   RESOURCE_GROUP: rg-expenses-prod
+  STACK_NAME: expenses-app
   CONTAINER_APP_NAME: ca-expenses-api
 
 jobs:
@@ -28,6 +34,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
+      - name: Check recreate confirmation
+        if: inputs.mode == 'recreate' && inputs.confirm != 'DELETE rg-expenses-prod'
+        run: |
+          echo "::error::recreate requires confirm = 'DELETE rg-expenses-prod'"
+          exit 1
+
       - uses: actions/checkout@v5
 
       - name: Sign in to Azure (OIDC)
@@ -38,7 +50,9 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       # Keep whatever image is already running so re-running infra never rolls the API back to the placeholder.
+      # Skipped on recreate: the registry is rebuilt empty, so the API starts on the placeholder until the next deploy.
       - name: Read current API image
+        if: inputs.mode != 'recreate'
         run: |
           image=$(az resource show \
             --resource-group "$RESOURCE_GROUP" \
@@ -52,7 +66,9 @@ jobs:
             echo "No API deployed yet; using placeholder image"
           fi
 
+      # Note: what-if shows creates and changes, but not deletions of resources removed from the templates.
       - name: What-if
+        if: inputs.mode != 'recreate'
         env:
           SQL_ADMIN_GROUP_ID: ${{ vars.SQL_ADMIN_GROUP_ID }}
         run: |
@@ -61,14 +77,51 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/main.bicepparam
 
+      - name: Delete all app resources
+        if: inputs.mode == 'recreate'
+        run: |
+          if az stack group show --name "$STACK_NAME" --resource-group "$RESOURCE_GROUP" --output none 2>/dev/null; then
+            az stack group delete \
+              --name "$STACK_NAME" \
+              --resource-group "$RESOURCE_GROUP" \
+              --action-on-unmanage deleteAll \
+              --yes
+          else
+            echo "No stack to delete"
+          fi
+
+      # Key Vault and Document Intelligence keep deleted resources for a while and block reusing their names.
+      - name: Purge soft-deleted resources
+        if: inputs.mode == 'recreate'
+        run: |
+          rg_path="/resourcegroups/${RESOURCE_GROUP,,}/"
+
+          az keyvault list-deleted --resource-type vault -o json \
+            | jq -r --arg rg "$rg_path" '.[] | select(.properties.vaultId | ascii_downcase | contains($rg)) | "\(.name) \(.properties.location)"' \
+            | while read -r name location; do
+                echo "Purging Key Vault $name"
+                az keyvault purge --name "$name" --location "$location"
+              done
+
+          az cognitiveservices account list-deleted -o json \
+            | jq -r --arg rg "$rg_path" '.[] | select(.id | ascii_downcase | contains($rg)) | "\(.name) \(.location)"' \
+            | while read -r name location; do
+                echo "Purging Cognitive Services account $name"
+                az cognitiveservices account purge --name "$name" --location "$location" --resource-group "$RESOURCE_GROUP"
+              done
+
+      # A deployment stack remembers what it created, so resources removed from the templates are deleted on apply.
       - name: Apply
-        if: inputs.mode == 'apply'
+        if: inputs.mode != 'what-if'
         env:
           SQL_ADMIN_GROUP_ID: ${{ vars.SQL_ADMIN_GROUP_ID }}
         run: |
-          az deployment group create \
-            --name "infra-${{ github.run_number }}" \
+          az stack group create \
+            --name "$STACK_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --template-file infra/main.bicep \
             --parameters infra/main.bicepparam \
-            --query properties.outputs -o json
+            --action-on-unmanage deleteResources \
+            --deny-settings-mode none \
+            --yes \
+            --query outputs -o json
