@@ -5,7 +5,7 @@ param name string
 @description('Principal allowed to pull images (the API managed identity).')
 param pullPrincipalId string
 
-var acrPullRoleId = '7f951dff-4ed5-43fd-a50b-7a2d9b8b3a3a'
+var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 
 resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   name: name

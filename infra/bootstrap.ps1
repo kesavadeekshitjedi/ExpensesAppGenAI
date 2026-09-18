@@ -28,7 +28,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 # Roles the deploy identity may hand out when Bicep assigns roles to the API identity.
 # Keep in sync with the roleAssignments in infra/modules.
 $assignableRoleIds = @(
-    '7f951dff-4ed5-43fd-a50b-7a2d9b8b3a3a' # AcrPull
+    '7f951dda-4ed3-4680-a7ca-43fe172d538d' # AcrPull
     'ba92f5b4-2d11-453d-a403-e96b0029c9fe' # Storage Blob Data Contributor
     '4633458b-17de-408a-b874-0445c86b69e6' # Key Vault Secrets User
     'a97b65f3-24c7-4388-baec-2e87135dc908' # Cognitive Services User
@@ -122,29 +122,34 @@ $condition = "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'}
 Set-RoleAssignment -Scope $appResourceGroupId -PrincipalId $identity.principalId -Role 'Role Based Access Control Administrator' -Condition $condition
 
 Write-Host "Creating custom role '$PurgeRoleName'"
-$purgeRole = [ordered]@{
-    Name             = $PurgeRoleName
-    Description      = 'Purge soft-deleted Key Vaults and Cognitive Services accounts so the Home Expenses app can be rebuilt with the same names.'
-    IsCustom         = $true
-    Actions          = @(
-        'Microsoft.KeyVault/deletedVaults/read'
-        'Microsoft.KeyVault/locations/deletedVaults/read'
-        'Microsoft.KeyVault/locations/deletedVaults/purge/action'
-        'Microsoft.KeyVault/locations/operationResults/read'
-        'Microsoft.CognitiveServices/deletedAccounts/read'
-        'Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/read'
-        'Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/delete'
-        'Microsoft.CognitiveServices/locations/operationResults/read'
-    )
-    NotActions       = @()
-    AssignableScopes = @($subscriptionScope)
-} | ConvertTo-Json
-$existingRole = az role definition list --custom-role-only true --name $PurgeRoleName | ConvertFrom-Json
-if ($existingRole) {
-    $update = $purgeRole | ConvertFrom-Json
-    $update | Add-Member -NotePropertyName id -NotePropertyValue $existingRole[0].id
-    az role definition update --role-definition (New-ArgFile ($update | ConvertTo-Json)) --output none
+$purgeDescription = 'Purge soft-deleted Key Vaults and Cognitive Services accounts so the Home Expenses app can be rebuilt with the same names.'
+$purgeActions = @(
+    'Microsoft.KeyVault/deletedVaults/read'
+    'Microsoft.KeyVault/locations/deletedVaults/read'
+    'Microsoft.KeyVault/locations/deletedVaults/purge/action'
+    'Microsoft.KeyVault/locations/operationResults/read'
+    'Microsoft.CognitiveServices/deletedAccounts/read'
+    'Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/read'
+    'Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/delete'
+    'Microsoft.CognitiveServices/locations/operationResults/read'
+)
+$existingRole = @(az role definition list --custom-role-only true --name $PurgeRoleName | ConvertFrom-Json)
+if ($existingRole.Count -gt 0) {
+    # `update` takes the same shape `list` returns (roleName, permissions[]), unlike `create`.
+    $definition = $existingRole[0]
+    $definition.description = $purgeDescription
+    $definition.permissions[0].actions = $purgeActions
+    $definition.assignableScopes = @($subscriptionScope)
+    az role definition update --role-definition (New-ArgFile ($definition | ConvertTo-Json -Depth 10)) --output none
 } else {
+    $purgeRole = [ordered]@{
+        Name             = $PurgeRoleName
+        Description      = $purgeDescription
+        IsCustom         = $true
+        Actions          = $purgeActions
+        NotActions       = @()
+        AssignableScopes = @($subscriptionScope)
+    } | ConvertTo-Json
     az role definition create --role-definition (New-ArgFile $purgeRole) --output none
 }
 Set-RoleAssignment -Scope $subscriptionScope -PrincipalId $identity.principalId -Role $PurgeRoleName

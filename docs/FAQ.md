@@ -83,6 +83,27 @@ To only check that the templates compile: `az bicep build --file infra/main.bice
 
 Their names depend on the API identity's principal ID, which doesn't exist until the first deploy creates the identity. What-if can't evaluate that ahead of time. They are created normally on apply.
 
+### The Infrastructure workflow failed. How do I see why without digging through the GitHub log?
+
+Ask Azure for the stack's error and each module's status:
+
+```powershell
+az stack group show --name expenses-app --resource-group rg-expenses-prod --query "{state:provisioningState, error:error}" -o json
+az deployment group list -g rg-expenses-prod --query "[].{name:name, state:properties.provisioningState}" -o table
+```
+
+The first shows the error message; the second shows which module (registry, sql, storage, ...) failed. Re-running `apply` after a fix is safe: resources that already succeeded are left as they are.
+
+### `apply` failed with `RoleDefinitionDoesNotExist` for a role ID
+
+A built-in role ID in the templates is wrong. (This happened once with AcrPull, whose correct ID is `7f951dda-4ed3-4680-a7ca-43fe172d538d`.) Look up the real ID rather than trusting memory:
+
+```powershell
+az role definition list --name AcrPull --query "[].{id:name, role:roleName}" -o table
+```
+
+Role IDs appear in **two** places, which must match: the module's `roleAssignments` in `infra/modules/*.bicep`, and `$assignableRoleIds` in `infra/bootstrap.ps1` (the list of roles the deploy identity may assign). After changing the bootstrap list, re-run `./infra/bootstrap.ps1` so the deploy identity's permission is updated; otherwise `apply` fails with an authorization error instead.
+
 ### Can we delete the resource group and redeploy if the architecture changes a lot?
 
 Yes. The Infrastructure workflow has three modes:
