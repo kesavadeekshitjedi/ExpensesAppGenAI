@@ -19,17 +19,28 @@ resource managedEnvironment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   location: location
   tags: tags
   properties: {
+    // azure-monitor routes logs through the diagnostic setting below, so no workspace shared key is needed.
     appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: workspace.properties.customerId
-        sharedKey: workspace.listKeys().primarySharedKey
-      }
+      destination: 'azure-monitor'
     }
     workloadProfiles: [
       {
         name: 'Consumption'
         workloadProfileType: 'Consumption'
+      }
+    ]
+  }
+}
+
+resource environmentLogs 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'to-log-analytics'
+  scope: managedEnvironment
+  properties: {
+    workspaceId: workspace.id
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
       }
     ]
   }

@@ -54,7 +54,11 @@ Current Azure pricing, free-tier limits, and GitHub Actions minute allowances fo
 
 ### Sign-in
 - Microsoft personal accounts (Outlook.com) and Google accounts (Gmail).
-- **(Proposed)** ASP.NET Core external login providers for Microsoft and Google.
+- **No client secrets, anywhere.** Sign-in must not require a client secret for Microsoft or Google. **(Proposed)** design:
+  - The web app (and later the iOS app) gets a signed **ID token** directly from the provider using public-client flows that have no secret: Microsoft via MSAL with PKCE (app registered as a single-page app, personal Microsoft accounts allowed); Google via Google Identity Services "Sign in with Google" (returns an ID token to the browser).
+  - The app sends that ID token to the API once. The API validates it against the provider's public signing keys (issuer, audience = our client ID, expiry), checks the email has an invitation, and starts its own session.
+  - API sessions are protected with ASP.NET Core Data Protection. Its keys are stored in Blob Storage and encrypted with a Key Vault key, both reached through the API's managed identity, so no signing key or secret appears in configuration.
+  - ASP.NET Core's server-side external login handlers (`AddGoogle`, `AddMicrosoftAccount`) are **not** used, because they require a client secret.
 - **Invitation only.** A person can only sign in if a parent has invited that email address. A valid Google or Microsoft account alone is not enough.
 - The auth design must work for the React web app now and the React Native app in phase 2 (token-based access for mobile).
 
@@ -256,7 +260,7 @@ The app raises **flags** for spending that deserves a second look. A flag is a s
 | Storage account (Blob) | Receipt images and item pictures |
 | Azure AI Document Intelligence | Receipt text extraction |
 | Email service | Alert emails |
-| Key Vault | OAuth client secrets, connection strings, API keys |
+| Key Vault | The key that encrypts the API's session-protection keys. No secrets: services are reached through managed identity, and sign-in uses no client secrets |
 | Application Insights | Logs and errors |
 
 All resources are defined in **Bicep** files in the repo (`infra/`) and created or updated by a manually triggered workflow, so the environment can be rebuilt from scratch. Resources are deployed as an Azure **deployment stack**, so anything removed from the templates is deleted on the next apply. A one-time script (`infra/bootstrap.ps1`) creates the deploy identity, its permissions, and the SQL admin group before the workflow can run.
@@ -265,7 +269,7 @@ All resources are defined in **Bicep** files in the repo (`infra/`) and created 
 - GitHub Actions signs in to Azure with **OpenID Connect (federated credentials)** on a Microsoft Entra app registration or managed identity.
 - **No Azure passwords or publish profiles are stored in GitHub.** GitHub only holds non-secret identifiers (tenant ID, subscription ID, client ID).
 - The identity is given the minimum role needed, scoped to the app's resource group: Contributor, plus the right to assign only the specific roles the templates use. At subscription level it has one narrow custom role that only allows purging soft-deleted Key Vaults and Document Intelligence resources (needed by `recreate`).
-- App secrets live in Key Vault; the API reads them through its managed identity.
+- The API reaches every Azure service through its managed identity, so there are no app secrets to store.
 
 ### Workflows
 
@@ -304,13 +308,17 @@ All resources are defined in **Bicep** files in the repo (`infra/`) and created 
 
 ### Rollback
 - Code rollback: revert the commit on `main`, which triggers a normal deploy of the previous version.
-- **(Proposed)** App Service deployment slots are not used initially, to keep cost low; revisit if downtime during deploys becomes a problem.
+- Container Apps can also switch traffic back to a previous revision if a quick rollback is needed.
 
 ### Secrets and configuration
-- Local: .NET user secrets and a git-ignored `.env` for the web app.
-- Azure: Key Vault and App Service configuration.
-- GitHub: only the OIDC identifiers, stored as repository or environment variables.
-- **Nothing secret is ever committed.**
+- **Goal: no secrets exist at all**, rather than secrets that are stored carefully.
+  - GitHub → Azure: OpenID Connect (federated credential); no passwords or publish profiles.
+  - API → SQL, Blob Storage, Key Vault, Document Intelligence, Email: the API's managed identity; no connection-string passwords or API keys (local key auth is disabled where the service allows it).
+  - Family sign-in: public-client flows with no client secret (see Users, Login, and Permissions).
+- Configuration values (endpoints, client IDs, origins) are not secret and are set as Container App environment variables by Bicep.
+- Local development: the API signs in to any Azure services as the developer through `az login` (DefaultAzureCredential); the web app's `.env.development` holds only non-secret URLs.
+- GitHub: only the OIDC identifiers, stored as environment variables.
+- **Nothing secret is ever committed**, and any new feature that would need a secret must first look for a managed-identity or public-client alternative.
 
 ---
 
@@ -426,3 +434,4 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 | 36 | Azure SQL tier: Basic (5 DTU) |
 | 37 | Azure region: West US 2 |
 | 38 | GitHub deploy identity lives in its own resource group (`rg-expenses-bootstrap`); app infra is deployed as a deployment stack; `infra.yml` has a `recreate` mode (delete and rebuild, with typed confirmation) |
+| 39 | Never use client secrets. Azure access uses OIDC and managed identities; family sign-in uses public-client flows (MSAL with PKCE, Google Identity Services ID tokens) validated by the API |
