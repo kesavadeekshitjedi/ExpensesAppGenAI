@@ -158,6 +158,38 @@ If Environments isn't available (GitHub's Free plan may not offer it for private
 
 GitHub > **Actions** > **Infrastructure** > **Run workflow**, then pick the mode. Run `what-if` first, then `apply`. The workflow only runs code that has been pushed to `main`.
 
+### How does a deploy happen?
+
+Automatically: push (or merge a PR) to `main` → **CI** runs → if CI passes, **Deploy** starts and deploys exactly that commit. Deploy builds the API image, points the Container App at it, checks `/health`, then builds and uploads the web app and checks the page loads. If CI fails, nothing is deployed.
+
+To deploy by hand (for example after running `infra` `recreate`, which leaves the API on the placeholder image): **Actions > Deploy > Run workflow**.
+
+### Why didn't Deploy run after I pushed?
+
+Deploy only starts when CI **succeeds** for a push to `main`. Check the CI run first; fix it and push again. Pull request CI runs never deploy.
+
+### How do I roll back a bad deploy?
+
+- **Normal way:** revert the commit on `main` (`git revert <sha>` and push). CI and Deploy run again and deploy the previous code.
+- **Fastest way for the API:** every deploy creates a new Container App revision. List them and send traffic back to the previous one:
+  ```powershell
+  az containerapp revision list -n ca-expenses-api -g rg-expenses-prod --query "[].{name:name, image:properties.template.containers[0].image, created:properties.createdTime}" -o table
+  az containerapp revision activate -n ca-expenses-api -g rg-expenses-prod --revision <revision-name>
+  ```
+  The next normal deploy replaces it again. (The web app has no revisions on the free tier; roll it back by reverting.)
+
+### Which API version is running right now?
+
+The image tag is the commit SHA it was built from:
+
+```powershell
+az containerapp show -n ca-expenses-api -g rg-expenses-prod --query "properties.template.containers[0].image" -o tsv
+```
+
+### Does the deploy use any secret?
+
+One, unavoidably: Static Web Apps only accepts uploads with its **deployment token**. The Deploy workflow fetches it at run time through the OIDC sign-in, masks it in the log, and never stores it in GitHub. Everything else (registry push, Container App update) uses the OIDC sign-in directly.
+
 ---
 
 ## Security and secrets

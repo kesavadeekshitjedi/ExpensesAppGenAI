@@ -37,7 +37,7 @@ Tests: `dotnet test ExpensesApp.slnx`
 | Web app | https://ashy-desert-0e2b1851e.4.azurestaticapps.net |
 | API | https://ca-expenses-api.ashycliff-08d8073a.westus2.azurecontainerapps.io |
 
-Both run placeholders until the deploy workflow (build step 4) exists. Current values: `az stack group show --name expenses-app --resource-group rg-expenses-prod --query outputs`.
+Every push to `main` that passes CI is deployed automatically by the **Deploy** workflow (API first, then web, each followed by a smoke test). It can also be run by hand from **Actions > Deploy > Run workflow**. Current addresses: `az stack group show --name expenses-app --resource-group rg-expenses-prod --query outputs`.
 
 ## Azure setup (one time)
 

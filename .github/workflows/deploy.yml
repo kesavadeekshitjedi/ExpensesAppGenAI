@@ -1,0 +1,148 @@
+name: Deploy
+
+# Runs after CI succeeds on main, so nothing is deployed that hasn't built and passed tests.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: rg-expenses-prod
+  STACK_NAME: expenses-app
+  # workflow_run: deploy exactly the commit CI tested. Manual run: the latest commit on the chosen branch.
+  COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+jobs:
+  deploy:
+    # Only CI runs from pushes to main; CI runs for pull requests never deploy.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: src/web/package-lock.json
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # Resource names and URLs come from the infrastructure stack, so they're never hardcoded twice.
+      - name: Read infrastructure outputs
+        run: |
+          outputs=$(az stack group show --name "$STACK_NAME" --resource-group "$RESOURCE_GROUP" --query outputs -o json)
+          {
+            echo "API_URL=$(jq -r .apiUrl.value <<< "$outputs")"
+            echo "WEB_URL=$(jq -r .webUrl.value <<< "$outputs")"
+            echo "CONTAINER_APP_NAME=$(jq -r .containerAppName.value <<< "$outputs")"
+            echo "REGISTRY_NAME=$(jq -r .registryName.value <<< "$outputs")"
+            echo "REGISTRY_LOGIN_SERVER=$(jq -r .registryLoginServer.value <<< "$outputs")"
+            echo "STATIC_WEB_APP_NAME=$(jq -r .staticWebAppName.value <<< "$outputs")"
+          } >> "$GITHUB_ENV"
+
+      # ---------- API ----------
+
+      - name: Sign in to the container registry
+        run: az acr login --name "$REGISTRY_NAME"
+
+      # The .NET SDK builds the image itself (no Dockerfile) on the official ASP.NET base image, listening on 8080.
+      - name: Build and push API image
+        run: |
+          dotnet publish src/api/Expenses.Api.csproj \
+            --configuration Release \
+            /t:PublishContainer \
+            -p:ContainerRegistry="$REGISTRY_LOGIN_SERVER" \
+            -p:ContainerRepository=expenses-api \
+            -p:ContainerImageTag="$COMMIT_SHA"
+          echo "API_IMAGE=$REGISTRY_LOGIN_SERVER/expenses-api:$COMMIT_SHA" >> "$GITHUB_ENV"
+
+      - name: Deploy API
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          az containerapp update \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --image "$API_IMAGE" \
+            --output none
+
+      # The app scales to zero, so the first request may wait for a cold start.
+      - name: Smoke test API
+        run: |
+          for attempt in $(seq 1 18); do
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$API_URL/health" || true)
+            if [ "$status" = "200" ]; then
+              echo "API healthy after $attempt attempt(s)"
+              exit 0
+            fi
+            echo "Attempt $attempt: HTTP $status, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::API did not return 200 from $API_URL/health"
+          exit 1
+
+      # ---------- Web ----------
+
+      - name: Build web app
+        working-directory: src/web
+        env:
+          VITE_API_BASE_URL: ${{ env.API_URL }}
+        run: |
+          npm ci
+          npm run build
+
+      # Static Web Apps only accepts uploads with its deployment token. It is fetched here with the OIDC
+      # sign-in, masked in logs, and never stored in GitHub. There is no token-free upload option.
+      - name: Get Static Web Apps deployment token
+        id: swa
+        run: |
+          token=$(az staticwebapp secrets list --name "$STATIC_WEB_APP_NAME" --resource-group "$RESOURCE_GROUP" --query properties.apiKey -o tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy web app
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          app_location: src/web/dist
+          output_location: ''
+          skip_app_build: true
+          skip_api_build: true
+
+      - name: Smoke test web app
+        run: |
+          for attempt in $(seq 1 12); do
+            if curl -s --max-time 20 "$WEB_URL" | grep -q '<title>Home Expenses</title>'; then
+              echo "Web app is serving this build"
+              exit 0
+            fi
+            echo "Attempt $attempt: new build not visible yet, retrying in 10s"
+            sleep 10
+          done
+          echo "::error::$WEB_URL is not serving the Home Expenses app"
+          exit 1

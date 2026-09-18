@@ -280,15 +280,18 @@ All resources are defined in **Bicep** files in the repo (`infra/`) and created 
 - A pull request cannot be merged unless CI passes **(Proposed:** branch protection on `main`).
 
 **2. CD — `deploy.yml`**
-- Trigger: push to `main` (i.e., after a PR is merged), plus manual run.
-- Only runs if CI passes.
+- Trigger: CI completing successfully for a push to `main` (i.e., after a PR is merged), plus manual run. It deploys exactly the commit CI tested.
+- Only runs if CI passes; CI runs for pull requests never deploy.
+- Resource names and URLs are read from the infrastructure stack's outputs, not hardcoded.
 - Steps, in order:
   1. Sign in to Azure via OIDC.
-  2. Build and publish the API.
-  3. **Apply database migrations** using an EF Core migration bundle. If migrations fail, the deploy stops and the API is not updated.
-  4. Deploy the API.
-  5. Build the web app with the production API address and deploy it to Static Web Apps.
-  6. Run a **smoke test**: call the API health endpoint and load the web app. The workflow fails visibly if either is down.
+  2. Build the API container image with the .NET SDK (no Dockerfile) and push it to Azure Container Registry, tagged with the commit SHA.
+  3. **Apply database migrations** using an EF Core migration bundle. If migrations fail, the deploy stops and the API is not updated. *(Added in build step 5, when the database code exists.)*
+  4. Point the Container App at the new image.
+  5. Smoke-test the API: `/health` must return 200 (retries allow for a cold start).
+  6. Build the web app with the production API address and upload it to Static Web Apps.
+  7. Smoke-test the web app: the page must serve the Home Expenses build.
+- **Exception to the no-secrets rule:** Static Web Apps only accepts uploads with its deployment token; there is no token-free option. The workflow fetches it at deploy time through the OIDC sign-in, masks it in logs, and never stores it.
 - **(Proposed)** Only deploy the parts that changed (API changes don't redeploy web, and vice versa).
 
 **3. Infrastructure — `infra.yml`**
