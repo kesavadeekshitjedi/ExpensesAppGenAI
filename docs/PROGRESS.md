@@ -7,24 +7,14 @@
 
 ## Where things stand
 
-Build steps 1–3 are done and verified. Azure infrastructure is live in West US 2, deployed by the GitHub **Infrastructure** workflow through a deployment stack. The API and web app currently run **placeholders**: the API is Microsoft's sample image, the web app is Azure's default page.
-
-Build step 4 (the **Deploy** workflow) was written and pushed in commit `9358348`, but **its first run was not yet confirmed** when the session ended. The first CI run on GitHub has also never been confirmed.
+Build steps 1–4 are done and verified. Azure infrastructure is live in West US 2, deployed by the GitHub **Infrastructure** workflow through a deployment stack. Every push to `main` runs CI, then Deploy. The first automatic deploy (commit `9358348`) succeeded: the API image is `expenses-api:93583487…`, `/health` returns `Healthy`, and the web app serves the Home Expenses page.
 
 ---
 
 ## Next actions, in order
 
-1. **Confirm CI and Deploy ran for `9358348`.** In GitHub > Actions, check **CI** (it must pass for **Deploy** to start), then **Deploy**. Or check from Azure:
-   ```powershell
-   az containerapp show -n ca-expenses-api -g rg-expenses-prod --query "properties.template.containers[0].image" -o tsv
-   # Success = crexpenseseewun4ezq3r6k.azurecr.io/expenses-api:9358348...  (still mcr.microsoft.com/dotnet/samples:aspnetapp = not deployed)
-   curl https://ca-expenses-api.ashycliff-08d8073a.westus2.azurecontainerapps.io/health   # expect: Healthy
-   ```
-   Then open https://ashy-desert-0e2b1851e.4.azurestaticapps.net and it should say **API status: healthy**.
-   If something failed, the likeliest causes are listed under "Unverified" below.
-2. **Build step 5: database, core entities, migrations in the pipeline.** See the step 5 notes below.
-3. Continue down the build order.
+1. **Build step 5: database, core entities, migrations in the pipeline.** See the step 5 notes below.
+2. Continue down the build order.
 
 ---
 
@@ -33,9 +23,9 @@ Build step 4 (the **Deploy** workflow) was written and pushed in commit `9358348
 From SPEC.md "Build Order for Phase 1".
 
 - [x] **1. Repo, solution, empty API with `/health`, React app running locally.** `ExpensesApp.slnx`, `src/api` (.NET 10), `src/web` (Vite + React + TypeScript), `tests/api.tests` (xUnit, 1 test). Verified locally: health test passes, web lints/builds, CORS works.
-- [x] **2. CI workflow**: `.github/workflows/ci.yml` builds and tests the API, lints and builds the web app, and compiles the Bicep. *First GitHub run not yet confirmed.*
-- [x] **3. Azure resources and OIDC sign-in from GitHub.** `infra/bootstrap.ps1` (run once, done), `infra/main.bicep` + `infra/modules/*`, `.github/workflows/infra.yml` (what-if / apply / recreate). `apply` succeeded; the API placeholder responds.
-- [~] **4. CD workflow**: `.github/workflows/deploy.yml` written and pushed. **First run unconfirmed.**
+- [x] **2. CI workflow**: `.github/workflows/ci.yml` builds and tests the API, lints and builds the web app, and compiles the Bicep. Confirmed passing on GitHub.
+- [x] **3. Azure resources and OIDC sign-in from GitHub.** `infra/bootstrap.ps1` (run once, done), `infra/main.bicep` + `infra/modules/*`, `.github/workflows/infra.yml` (what-if / apply / recreate). `apply` succeeded.
+- [x] **4. CD workflow**: `.github/workflows/deploy.yml`. It runs after CI passes on `main`, builds and pushes the API image, updates the Container App, uploads the web app, and smoke-tests both. The first run succeeded.
 - [ ] **5. Database, core entities, and migrations in the pipeline**
 - [ ] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles**
 - [ ] 7. Payment methods and categories
@@ -142,4 +132,4 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Adopted the no-client-secrets design.
   - Started docs/FAQ.md.
   - Fixed a wrong AcrPull role ID; infra `apply` then succeeded.
-  - Wrote and pushed the Deploy workflow (first run unconfirmed).
+  - Wrote the Deploy workflow; its first run succeeded (API healthy, web app live).
