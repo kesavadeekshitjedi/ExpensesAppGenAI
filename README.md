@@ -1,6 +1,6 @@
 # Home Expenses
 
-Family expense tracker. See [SPEC.md](SPEC.md) for the full project spec.
+Family expense tracker. See [SPEC.md](SPEC.md) for the full project spec and [docs/FAQ.md](docs/FAQ.md) for answers to questions that came up during the build.
 
 ## Layout
 
