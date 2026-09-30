@@ -1,9 +1,19 @@
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Expenses.Api.Data;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
+
+// The connection string is absent in unit tests (WebApplicationFactory) and in any environment
+// without a database configured, so registration is guarded like the telemetry block below.
+var connectionString = builder.Configuration.GetConnectionString("Expenses");
+if (!string.IsNullOrEmpty(connectionString))
+{
+    builder.Services.AddDbContext<ExpensesDbContext>(options => options.UseSqlServer(connectionString));
+}
 
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? [];
 builder.Services.AddCors(options =>

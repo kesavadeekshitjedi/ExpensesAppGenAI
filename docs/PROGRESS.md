@@ -1,6 +1,6 @@
 # Progress and Handoff Notes
 
-**Last updated:** 2026-09-18
+**Last updated:** 2026-09-30
 **Read this first** when picking the project back up. Then [SPEC.md](../SPEC.md) (what we're building and every decision) and [FAQ.md](FAQ.md) (how-tos and fixes already worked out).
 
 ---
@@ -9,12 +9,22 @@
 
 Build steps 1–4 are done and verified. Azure infrastructure is live in West US 2, deployed by the GitHub **Infrastructure** workflow through a deployment stack. Every push to `main` runs CI, then Deploy. The first automatic deploy (commit `9358348`) succeeded: the API image is `expenses-api:93583487…`, `/health` returns `Healthy`, and the web app serves the Home Expenses page.
 
+Step 5 (database) is **written and committed locally, not yet pushed/verified in the pipeline.** EF Core + the first migration (`Households`) are in place; the Deploy workflow now creates the API identity's DB user and applies migrations before switching the API image. This needs a real deploy to confirm (see "Verify step 5" below).
+
 ---
 
 ## Next actions, in order
 
-1. **Build step 5: database, core entities, migrations in the pipeline.** See the step 5 notes below.
-2. Continue down the build order.
+1. **Push and verify step 5 in the pipeline.** See "Verify step 5" below — the DB migration path has never actually run against Azure SQL, and a few assumptions (firewall, AAD auth from the runner) are only confirmed once Deploy runs.
+2. **Build step 6: household members, sign-in (Microsoft/Google), invitations, Parent/Child roles.** Open Question 1 (children's ages / supervised accounts) must be answered first. See the step 6 notes below.
+3. Continue down the build order.
+
+### Verify step 5 (after pushing)
+
+Push to `main`, let CI then Deploy run, and check:
+- Deploy's **"Grant the API identity access to the database"** and **"Apply database migrations"** steps succeed. These use `azure/sql-action` with `Authentication=Active Directory Default`; it should auto-add/remove a temporary firewall rule for the runner. If AAD auth or the firewall handling fails, that's the first thing to debug (fallbacks noted in FAQ → Database).
+- After deploy, the API can actually reach SQL at runtime (a future endpoint that queries the DB, or check App Insights for connection errors). The runtime user is created by `infra/sql/create-api-user.sql`.
+- Confirm the `Households` table and `__EFMigrationsHistory` exist in `sqldb-expenses`.
 
 ---
 
@@ -26,7 +36,7 @@ From SPEC.md "Build Order for Phase 1".
 - [x] **2. CI workflow**: `.github/workflows/ci.yml` builds and tests the API, lints and builds the web app, and compiles the Bicep. Confirmed passing on GitHub.
 - [x] **3. Azure resources and OIDC sign-in from GitHub.** `infra/bootstrap.ps1` (run once, done), `infra/main.bicep` + `infra/modules/*`, `.github/workflows/infra.yml` (what-if / apply / recreate). `apply` succeeded.
 - [x] **4. CD workflow**: `.github/workflows/deploy.yml`. It runs after CI passes on `main`, builds and pushes the API image, updates the Container App, uploads the web app, and smoke-tests both. The first run succeeded.
-- [ ] **5. Database, core entities, and migrations in the pipeline**
+- [x] **5. Database, core entities, and migrations in the pipeline** — *code committed; pipeline run not yet verified (see "Verify step 5").* EF Core 10 on the API, `ExpensesDbContext` + `Household` entity, initial migration, `dotnet-ef` as a local tool (`.config/dotnet-tools.json`), LocalDB for dev, and Deploy now grants the API identity's DB user and applies migrations before switching the image.
 - [ ] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles**
 - [ ] 7. Payment methods and categories
 - [ ] 8. Manual expense entry with line items, "for" tagging, value tags, and notes
@@ -39,15 +49,15 @@ From SPEC.md "Build Order for Phase 1".
 - [ ] 15. Spending flags with color coding
 - [ ] 16. Predictions
 
-### Notes for step 5 (database)
+### Notes for step 5 (database) — how it was built
 
-- EF Core with Azure SQL. The connection string is already set on the Container App as `ConnectionStrings__Expenses` and uses `Authentication=Active Directory Managed Identity` with the API identity's client ID, so there's no password.
-- The API identity (`id-expenses-api`) has **no database user yet**. Migrations must create it, idempotently, e.g.:
-  `CREATE USER [id-expenses-api] FROM EXTERNAL PROVIDER;` plus `db_datareader` / `db_datawriter` (and `db_ddladmin` only if the API ever runs migrations itself, which it shouldn't).
-  If `FROM EXTERNAL PROVIDER` fails because the SQL server can't read Entra ID, use `CREATE USER [id-expenses-api] WITH SID = <sid from client ID>, TYPE = E;` instead.
-- The deploy identity is a SQL admin through the **Expenses SQL Admins** group, so the Deploy workflow can run an EF Core **migration bundle** before switching the API image (SPEC: stop the deploy if migrations fail; migrations must be backward-compatible with the running API).
-- Unverified: whether GitHub-hosted runners get through the SQL firewall rule "Allow Azure services" (`0.0.0.0`). If not, add a temporary firewall rule for the runner's IP during the migration step and remove it afterwards.
-- Local development needs a local database (SQL Server LocalDB or a SQL Server container). This hasn't been chosen yet; decide at step 5.
+Decisions made (details in FAQ → Database):
+- **EF Core 10** on the API. `ExpensesDbContext` + configurations in `src/api/Data`; entities in `src/api/Domain`; migrations in `src/api/Data/Migrations`. Only the `Household` entity exists so far (the root everything scopes to); the rest are added in their own steps.
+- **`dotnet-ef` is a local tool** pinned in `.config/dotnet-tools.json`; `dotnet tool restore` before any `dotnet ef` command. An `ExpensesDbContextFactory` (design-time) lets `migrations`/`script` run without a database.
+- **Local dev DB: SQL Server LocalDB** (`(localdb)\MSSQLLocalDB`, database `expenses-dev`), configured in `appsettings.Development.json`. Chosen because it ships with Visual Studio — no Docker. Switching to a container is just a connection-string change.
+- **DbContext registration is guarded** (only when a connection string is present), so tests and connection-string-less environments still boot, matching the App Insights pattern in `Program.cs`.
+- **The API identity's DB user is created `WITH SID`** (computed from its client ID) by `infra/sql/create-api-user.sql`, not `FROM EXTERNAL PROVIDER` — so the SQL server needs no Directory Readers Entra role, and `recreate` keeps working. Grants `db_datareader`/`db_datawriter` only (the API never runs migrations itself).
+- **Deploy applies migrations** via `dotnet ef migrations script --idempotent` + `azure/sql-action`, after building the image and before switching it in. `azure/sql-action` handles AAD auth (OIDC session) and the temporary runner firewall rule, which resolves the old "can GitHub runners get through the SQL firewall?" question — pending the first real run to confirm.
 
 ### Notes for step 6 (sign-in), already decided
 
@@ -133,3 +143,7 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Started docs/FAQ.md.
   - Fixed a wrong AcrPull role ID; infra `apply` then succeeded.
   - Wrote the Deploy workflow; its first run succeeded (API healthy, web app live).
+- **2026-09-30**:
+  - Built step 5 (database): EF Core 10, `ExpensesDbContext` + `Household` entity + initial migration, `dotnet-ef` as a local tool, LocalDB for dev.
+  - Added DB migration to the Deploy workflow (create API identity's DB user `WITH SID`, then apply an idempotent migration script via `azure/sql-action`, before switching the API image).
+  - Documented it all in FAQ → Database. Committed locally; **not pushed** — needs a real deploy to verify the SQL steps.

@@ -8,6 +8,7 @@ Newest questions are added to the relevant section. For how to run the app local
 - [Azure CLI](#azure-cli)
 - [Infrastructure (Bicep)](#infrastructure-bicep)
 - [GitHub](#github)
+- [Database](#database)
 - [Security and secrets](#security-and-secrets)
 - [Visual Studio](#visual-studio)
 
@@ -189,6 +190,58 @@ az containerapp show -n ca-expenses-api -g rg-expenses-prod --query "properties.
 ### Does the deploy use any secret?
 
 One, unavoidably: Static Web Apps only accepts uploads with its **deployment token**. The Deploy workflow fetches it at run time through the OIDC sign-in, masks it in the log, and never stores it in GitHub. Everything else (registry push, Container App update) uses the OIDC sign-in directly.
+
+---
+
+## Database
+
+The API uses **Entity Framework Core** against **Azure SQL** in production and **SQL Server LocalDB** for local development. Entities live in `src/api/Domain`, the `ExpensesDbContext` and its configurations in `src/api/Data`, and migrations in `src/api/Data/Migrations`.
+
+### How do I set up the local development database?
+
+LocalDB ships with Visual Studio (and the "Data storage and processing" workload), so if you have Visual Studio you already have it. The development connection string is in `src/api/appsettings.Development.json` and points at `(localdb)\MSSQLLocalDB`, database `expenses-dev`.
+
+Create the local database and apply all migrations:
+
+```powershell
+dotnet tool restore                 # first time only: installs dotnet-ef from .config/dotnet-tools.json
+dotnet ef database update --project src/api
+```
+
+Then `dotnet run --project src/api` connects to it. To start over, `dotnet ef database drop --project src/api` and update again. (If you'd rather use a SQL Server container than LocalDB, change the `ConnectionStrings:Expenses` value in `appsettings.Development.json`.)
+
+### How do I add a new entity or change the schema?
+
+1. Add or edit the class in `src/api/Domain` and its configuration in `src/api/Data/Configurations`.
+2. Create a migration (pick a descriptive name):
+   ```powershell
+   dotnet ef migrations add AddPaymentMethods --project src/api --output-dir Data/Migrations
+   ```
+3. Review the generated `Up`/`Down` in `src/api/Data/Migrations`, then apply it locally with `dotnet ef database update --project src/api`.
+4. Commit the migration files. The deploy workflow applies them to production automatically.
+
+Migrations must be **backward-compatible with the running API** (the old API keeps serving while the new schema goes on), because migrations are applied before the new API image is switched in.
+
+### How do migrations reach the production database?
+
+The **Deploy** workflow does it, after building the API image and before switching the Container App to it (so a failed migration never ships a new API):
+
+1. `dotnet ef migrations script --idempotent` turns the committed migrations into one re-runnable SQL script. This needs no database connection; the design-time connection string in `ExpensesDbContextFactory` is only used to build the model.
+2. `infra/sql/create-api-user.sql` creates the API identity's database user and grants it `db_datareader`/`db_datawriter` (idempotent).
+3. The script from step 1 is applied.
+
+Steps 2 and 3 use `azure/sql-action`, which signs in with the workflow's OIDC session (`Authentication=Active Directory Default`) and adds then removes a temporary firewall rule for the runner's IP. There is no SQL password and no permanent firewall opening.
+
+### How does the API sign in to SQL with no password?
+
+Its connection string (set on the Container App by `infra/main.bicep`) uses `Authentication=Active Directory Managed Identity` with the `id-expenses-api` identity's client ID. The matching database user is created during deploy by `infra/sql/create-api-user.sql`.
+
+That script creates the user **`WITH SID`**, computing the SID from the identity's client ID (`0x` + `Guid.ToByteArray()` in hex), rather than `CREATE USER [id-expenses-api] FROM EXTERNAL PROVIDER`. `FROM EXTERNAL PROVIDER` would require the SQL server to have a managed identity with the **Directory Readers** Entra role so it can look the name up; `WITH SID` needs no such Entra permission and keeps working after `recreate` regenerates the identity, because the deploy recomputes the SID each run.
+
+### A migration or user-grant step failed with "Login failed" or "principal could not be resolved"
+
+- **Login failed for the API identity at runtime** usually means `create-api-user.sql` did not run or the SID didn't match. Confirm the deploy's "Grant the API identity access to the database" step succeeded, and that `API_IDENTITY_CLIENT_ID` in the deploy log matches the current `id-expenses-api` client ID (`az stack group show --name expenses-app --resource-group rg-expenses-prod --query outputs.apiIdentityClientId.value`).
+- **"Principal 'id-expenses-api' could not be resolved"** only happens if you switch the script to `FROM EXTERNAL PROVIDER`; the `WITH SID` approach avoids it.
 
 ---
 

@@ -63,6 +63,9 @@ jobs:
             echo "REGISTRY_NAME=$(jq -r .registryName.value <<< "$outputs")"
             echo "REGISTRY_LOGIN_SERVER=$(jq -r .registryLoginServer.value <<< "$outputs")"
             echo "STATIC_WEB_APP_NAME=$(jq -r .staticWebAppName.value <<< "$outputs")"
+            echo "SQL_SERVER_FQDN=$(jq -r .sqlServerFqdn.value <<< "$outputs")"
+            echo "SQL_DATABASE=$(jq -r .sqlDatabaseName.value <<< "$outputs")"
+            echo "API_IDENTITY_CLIENT_ID=$(jq -r .apiIdentityClientId.value <<< "$outputs")"
           } >> "$GITHUB_ENV"
 
       # ---------- API ----------
@@ -80,6 +83,43 @@ jobs:
             -p:ContainerRepository=expenses-api \
             -p:ContainerImageTag="$COMMIT_SHA"
           echo "API_IMAGE=$REGISTRY_LOGIN_SERVER/expenses-api:$COMMIT_SHA" >> "$GITHUB_ENV"
+
+      # ---------- Database ----------
+      # Migrations run before the API image is switched. If any step here fails, the job stops and
+      # the Container App keeps running the previous image (SPEC: migrations must be backward-compatible
+      # with the running API, and a failed migration must not ship a new API).
+
+      # Idempotent SQL for exactly the migrations in this commit; no database connection is made here.
+      - name: Generate migration script
+        run: |
+          dotnet tool restore
+          dotnet ef migrations script --idempotent \
+            --project src/api/Expenses.Api.csproj \
+            --output "${{ runner.temp }}/migrate.sql"
+
+      # The managed identity's database user is created WITH SID, derived from its client ID.
+      - name: Compute API identity database SID
+        shell: pwsh
+        run: |
+          $guid = [Guid]"${{ env.API_IDENTITY_CLIENT_ID }}"
+          $sid = '0x' + [BitConverter]::ToString($guid.ToByteArray()).Replace('-', '')
+          "API_IDENTITY_SID=$sid" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # azure/sql-action signs in with the OIDC session (Active Directory Default), and adds then
+      # removes a temporary firewall rule for the runner's IP, so no SQL password and no standing
+      # firewall opening are needed.
+      - name: Grant the API identity access to the database
+        uses: azure/sql-action@v2
+        with:
+          connection-string: 'Server=tcp:${{ env.SQL_SERVER_FQDN }},1433;Initial Catalog=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True;'
+          path: infra/sql/create-api-user.sql
+          arguments: '-v ApiIdentitySid=${{ env.API_IDENTITY_SID }}'
+
+      - name: Apply database migrations
+        uses: azure/sql-action@v2
+        with:
+          connection-string: 'Server=tcp:${{ env.SQL_SERVER_FQDN }},1433;Initial Catalog=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True;'
+          path: ${{ runner.temp }}/migrate.sql
 
       - name: Deploy API
         run: |

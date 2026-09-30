@@ -19,6 +19,9 @@ jobs:
       - run: dotnet restore ExpensesApp.slnx
       - run: dotnet build ExpensesApp.slnx --no-restore --configuration Release
       - run: dotnet test ExpensesApp.slnx --no-build --configuration Release
+      # Fails if the EF Core model changed without a matching migration being committed.
+      - run: dotnet tool restore
+      - run: dotnet ef migrations has-pending-model-changes --project src/api/Expenses.Api.csproj
 
   web:
     runs-on: ubuntu-latest

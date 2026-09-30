@@ -438,3 +438,6 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 | 37 | Azure region: West US 2 |
 | 38 | GitHub deploy identity lives in its own resource group (`rg-expenses-bootstrap`); app infra is deployed as a deployment stack; `infra.yml` has a `recreate` mode (delete and rebuild, with typed confirmation) |
 | 39 | Never use client secrets. Azure access uses OIDC and managed identities; family sign-in uses public-client flows (MSAL with PKCE, Google Identity Services ID tokens) validated by the API |
+| 40 | Local development database: SQL Server LocalDB (ships with Visual Studio; no Docker). Production is Azure SQL. Switching local dev to a container is just a connection-string change |
+| 41 | Database migrations are applied by the Deploy workflow (EF Core idempotent script via `azure/sql-action`) before the new API image is switched in; migrations must be backward-compatible with the running API. The API never migrates itself |
+| 42 | The API identity's SQL user is created `WITH SID` (from its client ID), not `FROM EXTERNAL PROVIDER`, so the SQL server needs no Directory Readers role and `recreate` keeps working |
