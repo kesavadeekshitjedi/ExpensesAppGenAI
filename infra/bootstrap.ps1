@@ -30,7 +30,8 @@ $PSNativeCommandUseErrorActionPreference = $true
 $assignableRoleIds = @(
     '7f951dda-4ed3-4680-a7ca-43fe172d538d' # AcrPull
     'ba92f5b4-2d11-453d-a403-e96b0029c9fe' # Storage Blob Data Contributor
-    '4633458b-17de-408a-b874-0445c86b69e6' # Key Vault Secrets User
+    '12338af0-0e69-4776-bea7-57ae8d297424' # Key Vault Crypto User (encrypts Data Protection keys)
+    '4633458b-17de-408a-b874-0445c86b69e6' # Key Vault Secrets User (retained so apply can delete the old assignment; drop on a later bootstrap)
     'a97b65f3-24c7-4388-baec-2e87135dc908' # Cognitive Services User
 )
 

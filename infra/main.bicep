@@ -85,7 +85,7 @@ module keyVault 'modules/keyvault.bicep' = {
     location: location
     tags: tags
     name: 'kv-exp-${suffix}'
-    readerPrincipalId: apiIdentity.properties.principalId
+    cryptoPrincipalId: apiIdentity.properties.principalId
   }
 }
 
@@ -142,6 +142,7 @@ module api 'modules/containerApp.bicep' = {
       { name: 'Email__Endpoint', value: email.outputs.endpoint }
       { name: 'Email__SenderAddress', value: email.outputs.senderAddress }
       { name: 'KeyVault__Uri', value: keyVault.outputs.uri }
+      { name: 'DataProtection__KeyVaultKeyId', value: keyVault.outputs.dataProtectionKeyId }
     ]
   }
 }

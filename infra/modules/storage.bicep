@@ -39,6 +39,12 @@ resource itemPictures 'Microsoft.Storage/storageAccounts/blobServices/containers
   name: 'item-pictures'
 }
 
+// Holds the ASP.NET Core Data Protection key ring (session cookie keys).
+resource dataProtection 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: 'dataprotection'
+}
+
 resource blobDataContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(account.id, dataContributorPrincipalId, blobDataContributorRoleId)
   scope: account
