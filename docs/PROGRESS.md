@@ -16,7 +16,7 @@ Step 5 (database) is **written and committed locally, not yet pushed/verified in
 ## Next actions, in order
 
 1. **Push and verify step 5 in the pipeline.** See "Verify step 5" below — the DB migration path has never actually run against Azure SQL, and a few assumptions (firewall, AAD auth from the runner) are only confirmed once Deploy runs.
-2. **Build step 6: household members, sign-in (Microsoft/Google), invitations, Parent/Child roles.** Open Question 1 (children's ages / supervised accounts) must be answered first. See the step 6 notes below.
+2. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). **Blocked on the user creating the Microsoft Entra app registration** and giving back its client ID; data-model work (members/invitations) can start in parallel.
 3. Continue down the build order.
 
 ### Verify step 5 (after pushing)
@@ -59,20 +59,35 @@ Decisions made (details in FAQ → Database):
 - **The API identity's DB user is created `WITH SID`** (computed from its client ID) by `infra/sql/create-api-user.sql`, not `FROM EXTERNAL PROVIDER` — so the SQL server needs no Directory Readers Entra role, and `recreate` keeps working. Grants `db_datareader`/`db_datawriter` only (the API never runs migrations itself).
 - **Deploy applies migrations** via `dotnet ef migrations script --idempotent` + `azure/sql-action`, after building the image and before switching it in. `azure/sql-action` handles AAD auth (OIDC session) and the temporary runner firewall rule, which resolves the old "can GitHub runners get through the SQL firewall?" question — pending the first real run to confirm.
 
-### Notes for step 6 (sign-in), already decided
+### Notes for step 6 (sign-in)
 
-- **No client secrets** (SPEC decision #39). Microsoft sign-in uses MSAL with PKCE (register a single-page app that allows personal Microsoft accounts). Google uses Google Identity Services ID tokens. The API validates the ID token, checks the invitation, and starts its own session. Do **not** use `AddGoogle` / `AddMicrosoftAccount`.
+**Scope decided 2026-09-30 (SPEC decisions #43–46):**
+- **Parents only sign in.** Children are member records with no login (created by a parent, used for "for" tagging in step 8). No child auth, no ages needed.
+- **Microsoft first, Google later.** Build and verify Microsoft (MSAL PKCE) end to end, then add Google Identity Services in a follow-up.
+- **First sign-in bootstraps the household:** the first person to sign in becomes a Parent and their household is created; everyone else joins via invitation.
+- **Invitations are shareable links/codes** the parent sends themselves. No email in step 6 (Communication Services deferred to step 12).
+
+**Blocking input from the user:** the **Microsoft Entra app registration (SPA)** — its client ID and configured redirect URIs. See "Create the Microsoft Entra app registration" below. Nothing about sign-in can be wired until that client ID exists (it's non-secret, goes in config).
+
+**Already-decided technical constraints:**
+- **No client secrets** (SPEC #39). The browser gets an ID token from the provider via MSAL PKCE; the API validates it against the provider's public keys, applies the bootstrap/invitation rules, and starts its own session. Do **not** use `AddGoogle` / `AddMicrosoftAccount` (they need a secret).
 - Sessions use ASP.NET Core Data Protection with keys in Blob Storage, encrypted with a Key Vault key through the managed identity. Infra changes needed then:
   - Add a Key Vault key, and give the API identity **Key Vault Crypto User** (replacing Key Vault Secrets User, which is no longer needed).
   - Add that role ID to `$assignableRoleIds` in `infra/bootstrap.ps1`, **re-run the bootstrap script**, then run `apply`. Verify role IDs with `az role definition list --name "<role>"` and never type them from memory (see FAQ).
-- Open question 1 (children's ages / supervised accounts) must be answered before this step.
+
+**Planned build order within step 6:**
+1. Data model: `Member` (with role + optional login fields), `Invitation` (with code/expiry/status), migration. *(Provider-agnostic; can start before the client ID arrives.)*
+2. Session infrastructure (Data Protection to Blob + Key Vault) and the Key Vault Crypto User infra change.
+3. Microsoft sign-in: validate the MSAL ID token, first-sign-in bootstrap, session issue/clear, `me` endpoint, Parent/Child authorization (all child writes rejected).
+4. Invitations: create/list/revoke (Parent only), accept-by-code on sign-in.
+5. Minimal web sign-in UI (MSAL) and a members screen.
 
 ---
 
 ## Open questions and pending decisions
 
 **From SPEC.md "Open Questions"** (still unanswered):
-1. Children's ages, and whether any use supervised Google/Microsoft accounts. *Needed before step 6.*
+1. ~~Children's ages / supervised accounts.~~ **Answered 2026-09-30:** children don't sign in in phase 1 (SPEC #43), so this is moot for now.
 2. Other "for" values besides members and Family (grandparents, pets, gifts)? *Needed before step 8.*
 3. Do children receive alerts or emails? *Step 12.*
 4. How are returns and refunds recorded? *Step 8.*
@@ -146,4 +161,5 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
 - **2026-09-30**:
   - Built step 5 (database): EF Core 10, `ExpensesDbContext` + `Household` entity + initial migration, `dotnet-ef` as a local tool, LocalDB for dev.
   - Added DB migration to the Deploy workflow (create API identity's DB user `WITH SID`, then apply an idempotent migration script via `azure/sql-action`, before switching the API image).
-  - Documented it all in FAQ → Database. Committed locally; **not pushed** — needs a real deploy to verify the SQL steps.
+  - Documented it all in FAQ → Database. Committed and **pushed** (`f94f221`); CI/Deploy triggered. The SQL steps still need the Deploy run checked to be considered verified.
+  - Decided step 6 scope with the user: parents-only sign-in, Microsoft before Google, first-sign-in bootstraps the household, invitations as shareable links/codes (SPEC #43–46). Next input needed: the Microsoft Entra app registration client ID.

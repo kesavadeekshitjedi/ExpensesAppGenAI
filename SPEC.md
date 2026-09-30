@@ -383,7 +383,7 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 
 ## Open Questions
 
-1. Ages of children, and whether any use supervised Google/Microsoft accounts (if children sign in at all).
+1. ~~Ages of children, and whether any use supervised Google/Microsoft accounts (if children sign in at all).~~ **Answered (2026-09-30):** children do **not** sign in in phase 1 (see Decision #43), so ages/supervised accounts are moot for now. Revisit if child sign-in is added later.
 2. Besides household members and Family, are other "for" values needed (e.g., grandparents, pets, gifts)?
 3. Do children receive any alerts or emails, or only see alerts when viewing the app?
 4. How are returns and refunds recorded? (Affects whether a refund lowers a person's monthly total.)
@@ -441,3 +441,7 @@ Deployment is set up early, so every later step ships to Azure through the pipel
 | 40 | Local development database: SQL Server LocalDB (ships with Visual Studio; no Docker). Production is Azure SQL. Switching local dev to a container is just a connection-string change |
 | 41 | Database migrations are applied by the Deploy workflow (EF Core idempotent script via `azure/sql-action`) before the new API image is switched in; migrations must be backward-compatible with the running API. The API never migrates itself |
 | 42 | The API identity's SQL user is created `WITH SID` (from its client ID), not `FROM EXTERNAL PROVIDER`, so the SQL server needs no Directory Readers role and `recreate` keeps working |
+| 43 | Phase 1 sign-in is **parents only**. Each child is a member record (so spending can be tagged "for" them) with no login; child sign-in is deferred, which makes Open Question 1 moot for phase 1 |
+| 44 | Sign-in providers are added incrementally: **Microsoft (MSAL with PKCE) first, Google (Identity Services) later** |
+| 45 | On a new install, the **first person to sign in becomes a Parent and their household is created** automatically; everyone else joins by invitation |
+| 46 | Phase 1 invitations are **shareable links/codes** a parent sends themselves; invitation email via Communication Services is deferred to step 12 |
