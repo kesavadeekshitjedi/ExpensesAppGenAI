@@ -2,13 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { msal } from './auth/msal'
+import { initAuth } from './auth/msal'
 
-// MSAL must be initialized once before any sign-in call (top-level await is fine in a Vite module).
-await msal.initialize()
+// Initialize MSAL and process a returning redirect before rendering (top-level await is fine here).
+const initialRedirect = await initAuth()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <App initialRedirect={initialRedirect} />
   </StrictMode>,
 )
