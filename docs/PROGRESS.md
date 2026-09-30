@@ -33,7 +33,7 @@ From SPEC.md "Build Order for Phase 1".
 - [x] **3. Azure resources and OIDC sign-in from GitHub.** `infra/bootstrap.ps1` (run once, done), `infra/main.bicep` + `infra/modules/*`, `.github/workflows/infra.yml` (what-if / apply / recreate). `apply` succeeded.
 - [x] **4. CD workflow**: `.github/workflows/deploy.yml`. It runs after CI passes on `main`, builds and pushes the API image, updates the Container App, uploads the web app, and smoke-tests both. The first run succeeded.
 - [x] **5. Database, core entities, and migrations in the pipeline** — *code committed; pipeline run not yet verified (see "Verify step 5").* EF Core 10 on the API, `ExpensesDbContext` + `Household` entity, initial migration, `dotnet-ef` as a local tool (`.config/dotnet-tools.json`), LocalDB for dev, and Deploy now grants the API identity's DB user and applies migrations before switching the image.
-- [ ] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles**
+- [~] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles** — *Microsoft sign-in built (code committed locally); Google deferred. Not yet deployed/verified — needs the infra steps below.* API: token validation, Data Protection cookie sessions, first-sign-in bootstrap, Parent/Child authorization, members + invitations endpoints. Web: MSAL sign-in, dashboard (members, invitations with shareable links). Infra: Key Vault data-protection key + Crypto User + dataprotection blob container.
 - [ ] 7. Payment methods and categories
 - [ ] 8. Manual expense entry with line items, "for" tagging, value tags, and notes
 - [ ] 9. Reports (basic)
@@ -72,12 +72,22 @@ Decisions made (details in FAQ → Database):
   - Add a Key Vault key, and give the API identity **Key Vault Crypto User** (replacing Key Vault Secrets User, which is no longer needed).
   - Add that role ID to `$assignableRoleIds` in `infra/bootstrap.ps1`, **re-run the bootstrap script**, then run `apply`. Verify role IDs with `az role definition list --name "<role>"` and never type them from memory (see FAQ).
 
-**Planned build order within step 6:**
-1. Data model: `Member` (with role + optional login fields), `Invitation` (with code/expiry/status), migration. *(Provider-agnostic; can start before the client ID arrives.)*
-2. Session infrastructure (Data Protection to Blob + Key Vault) and the Key Vault Crypto User infra change.
-3. Microsoft sign-in: validate the MSAL ID token, first-sign-in bootstrap, session issue/clear, `me` endpoint, Parent/Child authorization (all child writes rejected).
-4. Invitations: create/list/revoke (Parent only), accept-by-code on sign-in.
-5. Minimal web sign-in UI (MSAL) and a members screen.
+**Built (code committed locally, pending deploy):**
+1. ✅ Data model: `Member`, `Invitation`, migration.
+2. ✅ Session infra: Data Protection cookie; in Azure keys go to the `dataprotection` blob container encrypted by the Key Vault `dataprotection` key (Crypto User), via managed identity. `infra/main.bicep` passes `DataProtection__KeyVaultKeyId`.
+3. ✅ Microsoft sign-in: `IExternalIdentityValidator`/`MicrosoftIdentityValidator` (multi-tenant + MSA, no secret), `AuthService` provisioning (bootstrap/invite/deny), `/auth/session|me|logout`, `Parent` policy.
+4. ✅ Invitations: `/invitations` create/list/revoke (Parent-only), accept-by-code at `/auth/session`.
+5. ✅ Web: MSAL sign-in (honors `?invite=<code>`), dashboard with members + invitations.
+
+**To take step 6 live (in order):**
+1. **Re-run bootstrap** so the deploy identity may assign the new role: `./infra/bootstrap.ps1 -SubscriptionId 09b126a9-5a4c-4189-928e-8848ea663b26`.
+2. **Infrastructure workflow → `what-if`, then `apply`** (creates the Key Vault key, the `dataprotection` container, the Crypto User assignment, and sets `DataProtection__KeyVaultKeyId` on the Container App).
+3. **Push the step 6 commits** → CI → Deploy ships the new API image and the web app (deploy already passes the non-secret `VITE_ENTRA_CLIENT_ID`).
+4. **Test in a browser**: first sign-in creates the household + makes you Parent; add a child; create an invitation; open its link in another browser/profile and sign in with a different Microsoft account to join.
+
+**Still to do for step 6:** Google sign-in (Identity Services) in a follow-up; no automated web tests yet.
+
+**Known consideration:** the session cookie is cross-site (web on `azurestaticapps.net`, API on `azurecontainerapps.io`), set `SameSite=None; Secure`. Works in current browsers with CORS credentials; if a browser blocks third-party cookies it would break sign-in — fallback would be a bearer token or a Static Web Apps linked backend (needs the Standard tier, i.e. cost).
 
 ---
 
@@ -163,3 +173,5 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Decided step 6 scope with the user: parents-only sign-in, Microsoft before Google, first-sign-in bootstraps the household, invitations as shareable links/codes (SPEC #43–46).
   - Built the step 6 data model (`Member`, `Invitation` + migration), committed locally.
   - Created the Microsoft Entra SPA app registration via az CLI (client ID `7c5331e4-…`, no secret); documented in FAQ → Sign-in and identity.
+  - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
+  - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI. Committed locally; go-live needs bootstrap re-run + infra apply + push (see step 6 notes).

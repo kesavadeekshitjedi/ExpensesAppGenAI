@@ -303,6 +303,23 @@ Result (all **non-secret**, safe to commit and put in config):
 
 No client secret or certificate was created, and none should be — the browser gets an ID token via PKCE and the API validates it. The app registration lives in Entra ID, not in `rg-expenses-prod`, so `infra` `recreate` does not delete it. To add another redirect URI later (e.g., a new environment), re-run the `az rest` PATCH with the full list.
 
+### How does signing in actually work, end to end?
+
+1. The web app uses **MSAL** (`@azure/msal-browser`) to sign the user in with Microsoft (PKCE, no secret). The browser receives a signed **ID token**.
+2. The web app `POST`s that token to the API's **`/auth/session`** (with `credentials: include`).
+3. The API validates the token (signature against Microsoft's keys, audience = our client ID, issuer = a real Microsoft issuer) and then:
+   - existing member → signs in;
+   - valid invitation code in the request → creates the member with the invited role and marks the invitation accepted;
+   - no household exists yet (first ever sign-in) → creates the household and makes this user a **Parent** (SPEC #45);
+   - otherwise → `403` (an invitation is required).
+4. On success the API issues a **session cookie** (ASP.NET Core cookie auth). Its Data Protection keys live in the `dataprotection` blob container, encrypted by the Key Vault `dataprotection` key, both via the managed identity. Later requests send the cookie; `GET /auth/me` returns the current member; `POST /auth/logout` clears it.
+
+Children are **view-only**: the `Parent` authorization policy guards every write (adding members, creating/revoking invitations). Invitations are **shareable links** (`https://<web>/?invite=<code>`) the parent sends themselves; there is no invitation email in phase 1.
+
+### How do I run and test sign-in locally?
+
+Copy `src/web/.env.example` to `src/web/.env.local` (both values are non-secret), create the local database (see the Database section), then run the API and web as usual. `http://localhost:5173` is already a redirect URI on the app registration, so Microsoft sign-in works locally. The API reads the client ID from `appsettings.json` (`Auth:Microsoft:ClientId`); locally, sessions use the default Data Protection key ring (Azure Blob/Key Vault are only wired when their config is present), so no Azure access is needed just to sign in.
+
 ---
 
 ## Security and secrets
