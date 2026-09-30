@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Expenses.Api.Auth;
@@ -13,6 +14,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi();
 builder.Services.AddHealthChecks();
 builder.Services.AddSingleton(TimeProvider.System);
+
+// Serialize/accept enums as strings (e.g. "Microsoft", "Child") so the web app uses readable values.
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 // The connection string is absent in unit tests (WebApplicationFactory) and in any environment
 // without a database configured, so registration is guarded like the telemetry block below.
