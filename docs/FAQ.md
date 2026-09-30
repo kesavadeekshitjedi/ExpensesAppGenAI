@@ -9,6 +9,7 @@ Newest questions are added to the relevant section. For how to run the app local
 - [Infrastructure (Bicep)](#infrastructure-bicep)
 - [GitHub](#github)
 - [Database](#database)
+- [Sign-in and identity](#sign-in-and-identity)
 - [Security and secrets](#security-and-secrets)
 - [Visual Studio](#visual-studio)
 
@@ -242,6 +243,46 @@ That script creates the user **`WITH SID`**, computing the SID from the identity
 
 - **Login failed for the API identity at runtime** usually means `create-api-user.sql` did not run or the SID didn't match. Confirm the deploy's "Grant the API identity access to the database" step succeeded, and that `API_IDENTITY_CLIENT_ID` in the deploy log matches the current `id-expenses-api` client ID (`az stack group show --name expenses-app --resource-group rg-expenses-prod --query outputs.apiIdentityClientId.value`).
 - **"Principal 'id-expenses-api' could not be resolved"** only happens if you switch the script to `FROM EXTERNAL PROVIDER`; the `WITH SID` approach avoids it.
+
+---
+
+## Sign-in and identity
+
+### How was the Microsoft sign-in app registration created?
+
+With the Azure CLI, as a **single-page app (SPA)** registration with **no secret** (sign-in uses MSAL with PKCE — SPEC decision #39). After `az login`:
+
+```powershell
+# Create the app registration (personal + org accounts).
+$app = az ad app create --display-name "Home Expenses web" `
+    --sign-in-audience AzureADandPersonalMicrosoftAccount -o json | ConvertFrom-Json
+$app.appId   # Application (client) ID
+$app.id      # object ID (needed for the next step)
+
+# Add the SPA redirect URIs. The az CLI has no direct flag for SPA redirect URIs, so PATCH the
+# application's `spa` property through Microsoft Graph. (Put the JSON in a file to avoid Windows
+# quoting issues — see the Azure CLI section.)
+# body.json: {"spa":{"redirectUris":["http://localhost:5173","https://ashy-desert-0e2b1851e.4.azurestaticapps.net"]}}
+az rest --method PATCH `
+    --uri "https://graph.microsoft.com/v1.0/applications/$($app.id)" `
+    --headers "Content-Type=application/json" `
+    --body "@body.json"
+
+# Verify
+az ad app show --id $app.appId --query "{audience:signInAudience, spaRedirects:spa.redirectUris}" -o json
+```
+
+Result (all **non-secret**, safe to commit and put in config):
+
+| | |
+|---|---|
+| Application (client) ID | `7c5331e4-7ad2-4880-bbec-597b6338036f` |
+| Object ID | `c1106fbb-0c56-4951-83cd-1f140fd64238` |
+| Sign-in audience | personal + any org account |
+| SPA redirect URIs | `http://localhost:5173`, `https://ashy-desert-0e2b1851e.4.azurestaticapps.net` |
+| Authority | `https://login.microsoftonline.com/common` |
+
+No client secret or certificate was created, and none should be — the browser gets an ID token via PKCE and the API validates it. The app registration lives in Entra ID, not in `rg-expenses-prod`, so `infra` `recreate` does not delete it. To add another redirect URI later (e.g., a new environment), re-run the `az rest` PATCH with the full list.
 
 ---
 

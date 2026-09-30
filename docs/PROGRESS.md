@@ -16,7 +16,7 @@ Step 5 (database) is **written and committed locally, not yet pushed/verified in
 ## Next actions, in order
 
 1. **Push and verify step 5 in the pipeline.** See "Verify step 5" below — the DB migration path has never actually run against Azure SQL, and a few assumptions (firewall, AAD auth from the runner) are only confirmed once Deploy runs.
-2. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). **Blocked on the user creating the Microsoft Entra app registration** and giving back its client ID; data-model work (members/invitations) can start in parallel.
+2. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). Entra app registration and the data model are done. Next: session infra (Data Protection → Blob + Key Vault, + Key Vault Crypto User infra change), Microsoft token validation + first-sign-in bootstrap, Parent/Child authorization, invitations, and the MSAL web sign-in UI.
 3. Continue down the build order.
 
 ### Verify step 5 (after pushing)
@@ -67,7 +67,7 @@ Decisions made (details in FAQ → Database):
 - **First sign-in bootstraps the household:** the first person to sign in becomes a Parent and their household is created; everyone else joins via invitation.
 - **Invitations are shareable links/codes** the parent sends themselves. No email in step 6 (Communication Services deferred to step 12).
 
-**Blocking input from the user:** the **Microsoft Entra app registration (SPA)** — its client ID and configured redirect URIs. See "Create the Microsoft Entra app registration" below. Nothing about sign-in can be wired until that client ID exists (it's non-secret, goes in config).
+**Entra app registration: done (2026-09-30).** Created via az CLI (see FAQ → Sign-in and identity). Client ID `7c5331e4-7ad2-4880-bbec-597b6338036f`, SPA, personal + org accounts, no secret, redirect URIs for localhost and the prod SWA. This client ID is non-secret and goes in config (web build var + API token-audience check).
 
 **Already-decided technical constraints:**
 - **No client secrets** (SPEC #39). The browser gets an ID token from the provider via MSAL PKCE; the API validates it against the provider's public keys, applies the bootstrap/invitation rules, and starts its own session. Do **not** use `AddGoogle` / `AddMicrosoftAccount` (they need a secret).
@@ -122,6 +122,7 @@ Decisions made (details in FAQ → Database):
 | Bootstrap resource group | `rg-expenses-bootstrap` (never delete) |
 | GitHub deploy identity | `id-expenses-github`, client ID `6a7bddbb-8dee-42f5-a863-98f1b1cbc4e4`, trusts `repo:kesavadeekshitjedi/ExpensesAppGenAI:environment:production` |
 | API identity | `id-expenses-api`, client ID `3ba2006b-f865-4fce-a848-3014e9c1b3d7` |
+| Entra app registration (web sign-in) | `Home Expenses web`, **client ID `7c5331e4-7ad2-4880-bbec-597b6338036f`** (object ID `c1106fbb-0c56-4951-83cd-1f140fd64238`). SPA, personal + org accounts, no secret. Redirect URIs: `http://localhost:5173`, `https://ashy-desert-0e2b1851e.4.azurestaticapps.net`. Authority `common`. (Non-secret; safe to commit.) |
 | SQL admin group | `Expenses SQL Admins`, object ID `6b2b5df3-fff6-4740-96d1-ebb5d9c046a4` (the user + deploy identity) |
 | Custom role | `Expenses Soft-Delete Purger` (subscription scope, purge only) |
 | API | https://ca-expenses-api.ashycliff-08d8073a.westus2.azurecontainerapps.io (Container App `ca-expenses-api`) |
@@ -162,4 +163,6 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Built step 5 (database): EF Core 10, `ExpensesDbContext` + `Household` entity + initial migration, `dotnet-ef` as a local tool, LocalDB for dev.
   - Added DB migration to the Deploy workflow (create API identity's DB user `WITH SID`, then apply an idempotent migration script via `azure/sql-action`, before switching the API image).
   - Documented it all in FAQ → Database. Committed and **pushed** (`f94f221`); CI/Deploy triggered. The SQL steps still need the Deploy run checked to be considered verified.
-  - Decided step 6 scope with the user: parents-only sign-in, Microsoft before Google, first-sign-in bootstraps the household, invitations as shareable links/codes (SPEC #43–46). Next input needed: the Microsoft Entra app registration client ID.
+  - Decided step 6 scope with the user: parents-only sign-in, Microsoft before Google, first-sign-in bootstraps the household, invitations as shareable links/codes (SPEC #43–46).
+  - Built the step 6 data model (`Member`, `Invitation` + migration), committed locally.
+  - Created the Microsoft Entra SPA app registration via az CLI (client ID `7c5331e4-…`, no secret); documented in FAQ → Sign-in and identity.
