@@ -166,6 +166,19 @@ Automatically: push (or merge a PR) to `main` → **CI** runs → if CI passes, 
 
 To deploy by hand (for example after running `infra` `recreate`, which leaves the API on the placeholder image): **Actions > Deploy > Run workflow**.
 
+### How do I see why a workflow (CI, Deploy, Infrastructure) failed from the terminal?
+
+Use the **GitHub CLI** (`gh`; install with `winget install GitHub.cli`, then `gh auth login` once). From the repo root:
+
+```powershell
+gh run list --limit 5                     # recent runs and their status
+gh run view <run-id>                       # per-job / per-step summary
+gh run view <run-id> --log-failed          # just the logs of the steps that failed
+gh run watch <run-id>                      # follow a run live
+```
+
+`gh` is required for working with Actions from the terminal (this repo's CI, Deploy, and Infrastructure workflows). If `gh` is freshly installed, open a new terminal so it is on `PATH`, or call it by full path (`& "C:\Program Files\GitHub CLI\gh.exe"`).
+
 ### Why didn't Deploy run after I pushed?
 
 Deploy only starts when CI **succeeds** for a push to `main`. Check the CI run first; fix it and push again. Pull request CI runs never deploy.

@@ -12,9 +12,19 @@ Family expense tracker. See [SPEC.md](SPEC.md) for the full project spec and [do
 | `infra` | Bicep templates and the one-time bootstrap script |
 | `.github/workflows` | CI and infrastructure workflows |
 
-## Run locally
+## Prerequisites
 
-Prerequisites: .NET SDK 10, Node.js 24.
+| Tool | Used for |
+|---|---|
+| .NET SDK 10 | API build, tests, EF Core migrations |
+| Node.js 24 | web app |
+| Azure CLI (`az`) | infrastructure, the app registration, SQL/deploy diagnostics |
+| GitHub CLI (`gh`) | viewing and managing GitHub Actions runs (CI/Deploy/Infrastructure) from the terminal |
+| SQL Server LocalDB | local development database (ships with Visual Studio) |
+
+Install the two CLIs on Windows with `winget install Microsoft.AzureCLI` and `winget install GitHub.cli`, then sign each in once: `az login` (see [FAQ](docs/FAQ.md#azure-cli)) and `gh auth login`.
+
+## Run locally
 
 ```powershell
 # Terminal 1 - API on http://localhost:5080
