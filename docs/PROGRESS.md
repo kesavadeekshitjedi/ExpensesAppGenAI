@@ -83,7 +83,7 @@ Decisions made (details in FAQ → Database):
 1. ✅ Re-ran bootstrap (deploy identity can assign Key Vault Crypto User).
 2. ✅ Infrastructure `what-if` then `apply` — Key Vault `dataprotection` key, `dataprotection` blob container, Crypto User assignment, and `DataProtection__KeyVaultKeyId` on the Container App all created/set.
 3. ✅ Pushed; Deploy `36749392814` shipped the new API image (`423457a`) and the web app. `/health` green; unauthenticated `/auth/me`, `/members`, and a bad-token `/auth/session` all correctly return 401.
-4. ⏳ **Remaining: real browser sign-in test.** Open the web app, sign in with Microsoft (first sign-in makes you Parent + creates the household), add a child, create an invitation, and accept its link from a second Microsoft account. This needs a real Microsoft login so it hasn't been automated.
+4. ✅ **Browser sign-in verified (2026-09-30).** Signing in with Microsoft works end to end (Parent + household created on first sign-in). Fix along the way: the web app now uses the MSAL **redirect** flow with `handleRedirectPromise` (the popup flow left the auth code stranded in the URL); an `?invite=` code is preserved across the redirect via `sessionStorage`.
 
 **Still to do for step 6:** Google sign-in (Identity Services) in a follow-up; no automated web tests yet.
 
@@ -175,4 +175,5 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Created the Microsoft Entra SPA app registration via az CLI (client ID `7c5331e4-…`, no secret); documented in FAQ → Sign-in and identity.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
-  - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected). Real browser sign-in test still pending.
+  - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).
+  - Fixed web sign-in (MSAL redirect flow + handleRedirectPromise) and **verified Microsoft sign-in end to end in the browser**. Step 6 Microsoft path complete; Google sign-in still to do.
