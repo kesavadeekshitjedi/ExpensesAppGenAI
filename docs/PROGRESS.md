@@ -57,7 +57,8 @@ Decisions made (details in FAQ → Database):
 - **Local dev DB: SQL Server LocalDB** (`(localdb)\MSSQLLocalDB`, database `expenses-dev`), configured in `appsettings.Development.json`. Chosen because it ships with Visual Studio — no Docker. Switching to a container is just a connection-string change.
 - **DbContext registration is guarded** (only when a connection string is present), so tests and connection-string-less environments still boot, matching the App Insights pattern in `Program.cs`.
 - **The API identity's DB user is created `WITH SID`** (computed from its client ID) by `infra/sql/create-api-user.sql`, not `FROM EXTERNAL PROVIDER` — so the SQL server needs no Directory Readers Entra role, and `recreate` keeps working. Grants `db_datareader`/`db_datawriter` only (the API never runs migrations itself).
-- **Deploy applies migrations** via `dotnet ef migrations script --idempotent` + `azure/sql-action`, after building the image and before switching it in. `azure/sql-action` handles AAD auth (OIDC session) and the temporary runner firewall rule, which resolves the old "can GitHub runners get through the SQL firewall?" question — pending the first real run to confirm.
+- **Deploy applies migrations** via `dotnet ef migrations script --idempotent` + `sqlcmd` (`--authentication-method ActiveDirectoryDefault`), after building the image and before switching it in. Each SQL script is retried (transient Azure SQL 40613 on first connection to an idle DB).
+- **Confirmed on the first real run (2026-09-30):** OIDC/AAD auth works from the runner, and **GitHub-hosted runners reach the SQL server through the "Allow Azure services" (`0.0.0.0`) rule** — no firewall change needed. The first attempt failed only on transient 40613; switched from `azure/sql-action` (no retry) to the `sqlcmd` retry loop to handle it. Re-run pending.
 
 ### Notes for step 6 (sign-in)
 

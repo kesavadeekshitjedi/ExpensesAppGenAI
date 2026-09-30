@@ -244,7 +244,13 @@ The **Deploy** workflow does it, after building the API image and before switchi
 2. `infra/sql/create-api-user.sql` creates the API identity's database user and grants it `db_datareader`/`db_datawriter` (idempotent).
 3. The script from step 1 is applied.
 
-Steps 2 and 3 use `azure/sql-action`, which signs in with the workflow's OIDC session (`Authentication=Active Directory Default`) and adds then removes a temporary firewall rule for the runner's IP. There is no SQL password and no permanent firewall opening.
+Steps 2 and 3 run with `sqlcmd` (`--authentication-method ActiveDirectoryDefault`), authenticating with the workflow's OIDC session — no SQL password. GitHub-hosted runners run on Azure and reach the server through the SQL server's "Allow Azure services" (`0.0.0.0`) firewall rule, so no firewall change is needed. Each script is retried, because Azure SQL can return a transient error on the first connection to an idle database (see below).
+
+### The deploy failed at "Apply database changes" with "Database '...' is not currently available"
+
+That is Azure SQL error **40613**, a transient error that commonly hits the *first* connection to an idle Basic-tier database while the platform brings it online. Auth and networking are fine when you see it (the error comes from the database, not the login or firewall). The deploy retries each SQL script up to 10 times (15s apart), which normally rides it out. If it still fails after retries, just re-run the Deploy job (**Actions > Deploy**, or `gh run rerun <run-id>`); it is safe because both scripts are idempotent.
+
+An earlier version used `azure/sql-action`, which does not retry, so a single 40613 failed the whole deploy. It was replaced with the `sqlcmd` retry loop for that reason.
 
 ### How does the API sign in to SQL with no password?
 

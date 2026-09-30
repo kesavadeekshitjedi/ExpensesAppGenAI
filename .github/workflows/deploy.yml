@@ -105,21 +105,34 @@ jobs:
           $sid = '0x' + [BitConverter]::ToString($guid.ToByteArray()).Replace('-', '')
           "API_IDENTITY_SID=$sid" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      # azure/sql-action signs in with the OIDC session (Active Directory Default), and adds then
-      # removes a temporary firewall rule for the runner's IP, so no SQL password and no standing
-      # firewall opening are needed.
-      - name: Grant the API identity access to the database
-        uses: azure/sql-action@v2
-        with:
-          connection-string: 'Server=tcp:${{ env.SQL_SERVER_FQDN }},1433;Initial Catalog=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True;'
-          path: infra/sql/create-api-user.sql
-          arguments: '-v ApiIdentitySid=${{ env.API_IDENTITY_SID }}'
+      - name: Install sqlcmd
+        run: |
+          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y sqlcmd
 
-      - name: Apply database migrations
-        uses: azure/sql-action@v2
-        with:
-          connection-string: 'Server=tcp:${{ env.SQL_SERVER_FQDN }},1433;Initial Catalog=${{ env.SQL_DATABASE }};Authentication=Active Directory Default;Encrypt=True;'
-          path: ${{ runner.temp }}/migrate.sql
+      # Create the API identity's DB user, then apply migrations. Both scripts are idempotent.
+      # Auth is the workflow's OIDC session (Active Directory Default); GitHub-hosted runners reach
+      # the server through the SQL "Allow Azure services" rule (no password, no firewall change).
+      # Azure SQL can return a transient "database is not currently available" (error 40613) on the
+      # first connection to an idle Basic-tier database, so each script is retried.
+      - name: Apply database changes
+        run: |
+          run_sql() {
+            for attempt in $(seq 1 10); do
+              if sqlcmd -S "$SQL_SERVER_FQDN" -d "$SQL_DATABASE" \
+                   --authentication-method ActiveDirectoryDefault -b "$@"; then
+                return 0
+              fi
+              echo "SQL attempt $attempt failed; retrying in 15s"
+              sleep 15
+            done
+            echo "::error::SQL command did not succeed after 10 attempts"
+            return 1
+          }
+          run_sql -i infra/sql/create-api-user.sql -v ApiIdentitySid="$API_IDENTITY_SID"
+          run_sql -i "${{ runner.temp }}/migrate.sql"
 
       - name: Deploy API
         run: |
