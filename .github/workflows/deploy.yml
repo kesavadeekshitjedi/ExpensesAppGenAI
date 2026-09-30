@@ -105,12 +105,14 @@ jobs:
           $sid = '0x' + [BitConverter]::ToString($guid.ToByteArray()).Replace('-', '')
           "API_IDENTITY_SID=$sid" | Out-File -FilePath $env:GITHUB_ENV -Append
 
+      # go-sqlcmd (not the ODBC sqlcmd) is what supports --authentication-method ActiveDirectoryDefault.
+      # It isn't an apt package for the runner's Ubuntu, so download the release binary and put it on PATH.
       - name: Install sqlcmd
         run: |
-          curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
-          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
-          sudo apt-get update
-          sudo apt-get install -y sqlcmd
+          curl -fsSL -o /tmp/sqlcmd.tar.bz2 https://github.com/microsoft/go-sqlcmd/releases/download/v1.10.0/sqlcmd-linux-amd64.tar.bz2
+          mkdir -p /tmp/sqlcmd
+          tar xjf /tmp/sqlcmd.tar.bz2 -C /tmp/sqlcmd
+          echo "/tmp/sqlcmd" >> "$GITHUB_PATH"
 
       # Create the API identity's DB user, then apply migrations. Both scripts are idempotent.
       # Auth is the workflow's OIDC session (Active Directory Default); GitHub-hosted runners reach
