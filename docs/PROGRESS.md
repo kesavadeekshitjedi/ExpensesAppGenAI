@@ -9,22 +9,18 @@
 
 Build steps 1–4 are done and verified. Azure infrastructure is live in West US 2, deployed by the GitHub **Infrastructure** workflow through a deployment stack. Every push to `main` runs CI, then Deploy. The first automatic deploy (commit `9358348`) succeeded: the API image is `expenses-api:93583487…`, `/health` returns `Healthy`, and the web app serves the Home Expenses page.
 
-Step 5 (database) is **written and committed locally, not yet pushed/verified in the pipeline.** EF Core + the first migration (`Households`) are in place; the Deploy workflow now creates the API identity's DB user and applies migrations before switching the API image. This needs a real deploy to confirm (see "Verify step 5" below).
+Step 5 (database) is **done and verified in production (2026-09-30).** Deploy run `36746336438` created the API identity's SQL user, applied both migrations (`Households`, `Members`/`Invitations`) recorded in `__EFMigrationsHistory`, switched the Container App to the new image, and `/health` returns `Healthy`. Confirmed along the way: OIDC/AAD auth works from the runner and GitHub-hosted runners pass the SQL "Allow Azure services" firewall rule.
 
 ---
 
 ## Next actions, in order
 
-1. **Push and verify step 5 in the pipeline.** See "Verify step 5" below — the DB migration path has never actually run against Azure SQL, and a few assumptions (firewall, AAD auth from the runner) are only confirmed once Deploy runs.
-2. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). Entra app registration and the data model are done. Next: session infra (Data Protection → Blob + Key Vault, + Key Vault Crypto User infra change), Microsoft token validation + first-sign-in bootstrap, Parent/Child authorization, invitations, and the MSAL web sign-in UI.
-3. Continue down the build order.
+1. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). Entra app registration and the data model are done. Next: session infra (Data Protection → Blob + Key Vault, + Key Vault Crypto User infra change), Microsoft token validation + first-sign-in bootstrap, Parent/Child authorization, invitations, and the MSAL web sign-in UI.
+2. Continue down the build order.
 
-### Verify step 5 (after pushing)
+### Loose ends to tidy
 
-Push to `main`, let CI then Deploy run, and check:
-- Deploy's **"Grant the API identity access to the database"** and **"Apply database migrations"** steps succeed. These use `azure/sql-action` with `Authentication=Active Directory Default`; it should auto-add/remove a temporary firewall rule for the runner. If AAD auth or the firewall handling fails, that's the first thing to debug (fallbacks noted in FAQ → Database).
-- After deploy, the API can actually reach SQL at runtime (a future endpoint that queries the DB, or check App Insights for connection errors). The runtime user is created by `infra/sql/create-api-user.sql`.
-- Confirm the `Households` table and `__EFMigrationsHistory` exist in `sqldb-expenses`.
+- The API doesn't yet *use* the database at runtime (no DB-backed endpoint). Runtime SQL access by the managed identity is therefore proven only insofar as the app starts; the first real query lands in step 6.
 
 ---
 
