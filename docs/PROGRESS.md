@@ -11,16 +11,22 @@ Build steps 1–4 are done and verified. Azure infrastructure is live in West US
 
 Step 5 (database) is **done and verified in production (2026-09-30).** Deploy run `36746336438` created the API identity's SQL user, applied both migrations (`Households`, `Members`/`Invitations`) recorded in `__EFMigrationsHistory`, switched the Container App to the new image, and `/health` returns `Healthy`. Confirmed along the way: OIDC/AAD auth works from the runner and GitHub-hosted runners pass the SQL "Allow Azure services" firewall rule.
 
+Step 6 (members, sign-in, invitations, roles) — **Microsoft sign-in is done, deployed, and verified end to end in the browser (2026-09-30).** Signing in with Microsoft creates your household and makes you Parent; the API uses the database at runtime (members/invitations). Runtime managed-identity SQL access is therefore proven. **Google sign-in is the one remaining piece of step 6.**
+
 ---
 
 ## Next actions, in order
 
-1. **Build step 6: household members, sign-in (Microsoft first), invitations, Parent/Child roles.** Scope decided 2026-09-30 (see step 6 notes). Entra app registration and the data model are done. Next: session infra (Data Protection → Blob + Key Vault, + Key Vault Crypto User infra change), Microsoft token validation + first-sign-in bootstrap, Parent/Child authorization, invitations, and the MSAL web sign-in UI.
-2. Continue down the build order.
+**Pick up here next session.** The last open choice (asked at end of 2026-09-30 session, not yet answered): **finish step 6 with Google sign-in, or move to step 7.** Either is a clean starting point.
 
-### Loose ends to tidy
+1. **Option A — Finish step 6: Google sign-in.** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (validate Google ID token: issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret needed for GIS ID-token flow). Add a "Sign in with Google" button to the web app that gets an ID token and POSTs it to `/auth/session` with `provider: "Google"`. The provisioning logic, sessions, invitations, and roles already work provider-agnostically — only validation + a button are new. Put the Google client ID in non-secret config like the Microsoft one.
+2. **Option B — Step 7: payment methods & categories.** First real household data behind the new auth. Entities `PaymentMethod` (label + type, no card/account numbers — SPEC #12) and `Category` (with a default category list, SPEC feature 5), scoped to the signed-in household, Parent-only writes, + migration + endpoints + web screens.
+3. Continue down the build order.
 
-- The API doesn't yet *use* the database at runtime (no DB-backed endpoint). Runtime SQL access by the managed identity is therefore proven only insofar as the app starts; the first real query lands in step 6.
+### Loose ends to tidy (non-blocking)
+
+- Doc-only commits still trigger a full redeploy (CI→Deploy on every push to `main`). The "deploy only changed parts" item is still open (see pending decisions).
+- Google sign-in (Option A above) is the only unfinished part of step 6.
 
 ---
 
