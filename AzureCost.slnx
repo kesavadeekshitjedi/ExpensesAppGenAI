@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AzureCost.Console/AzureCost.Console.csproj" />
+    <Project Path="src/AzureCost.Core/AzureCost.Core.csproj" />
+    <Project Path="src/AzureCost.WinUI/AzureCost.WinUI.csproj">
+      <Platform Project="x86" />
+    </Project>
+  </Folder>
+</Solution>

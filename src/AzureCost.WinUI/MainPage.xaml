@@ -1,0 +1,287 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="AzureCost_WinUI.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:AzureCost_WinUI.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:AzureCost_WinUI"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:AzureCost_WinUI.Models"
+    mc:Ignorable="d">
+
+    <Page.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVisibility" />
+    </Page.Resources>
+
+    <Grid Padding="24" RowSpacing="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!--  Toolbar  -->
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ComboBox
+                Grid.Column="0"
+                MinWidth="260"
+                Header="Subscription"
+                DisplayMemberPath="DisplayName"
+                ItemsSource="{x:Bind ViewModel.Subscriptions, Mode=OneWay}"
+                SelectedItem="{x:Bind ViewModel.SelectedSubscription, Mode=TwoWay}" />
+
+            <ComboBox
+                Grid.Column="1"
+                MinWidth="150"
+                Header="Period"
+                DisplayMemberPath="Label"
+                ItemsSource="{x:Bind ViewModel.Periods, Mode=OneWay}"
+                SelectedItem="{x:Bind ViewModel.SelectedPeriod, Mode=TwoWay}" />
+
+            <ProgressRing
+                Grid.Column="3"
+                Width="24"
+                Height="24"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,6"
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
+
+            <Button
+                Grid.Column="4"
+                VerticalAlignment="Bottom"
+                Command="{x:Bind ViewModel.RefreshCommand}"
+                Style="{StaticResource AccentButtonStyle}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                    <TextBlock Text="Refresh" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!--  Error  -->
+        <InfoBar
+            Grid.Row="1"
+            IsClosable="True"
+            IsOpen="{x:Bind ViewModel.HasError, Mode=OneWay}"
+            Message="{x:Bind ViewModel.ErrorMessage, Mode=OneWay}"
+            Severity="Error"
+            Title="Could not load cost data" />
+
+        <!--  Summary card  -->
+        <Border
+            Grid.Row="2"
+            Padding="20"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+            <StackPanel Spacing="2">
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="TOTAL SPEND" />
+                <TextBlock
+                    FontSize="36"
+                    FontWeight="SemiBold"
+                    Text="{x:Bind ViewModel.TotalCostDisplay, Mode=OneWay}" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="{x:Bind ViewModel.SubscriptionCaption, Mode=OneWay}" />
+            </StackPanel>
+        </Border>
+
+        <!--  Content: resource groups | resources  -->
+        <Grid Grid.Row="3" ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="380" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!--  Resource groups  -->
+            <Border
+                Grid.Column="0"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock
+                        Margin="16,16,16,8"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="Resource groups" />
+
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="16"
+                        VerticalAlignment="Top"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="No cost data for this period."
+                        Visibility="{x:Bind ViewModel.HasNoResourceGroups, Mode=OneWay, Converter={StaticResource BoolToVisibility}}" />
+
+                    <ListView
+                        Grid.Row="1"
+                        Padding="8,0,8,8"
+                        IsItemClickEnabled="False"
+                        ItemsSource="{x:Bind ViewModel.ResourceGroups, Mode=OneWay}"
+                        SelectedItem="{x:Bind ViewModel.SelectedResourceGroup, Mode=TwoWay}"
+                        SelectionMode="Single">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="12,10" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:ResourceGroupRow">
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="6">
+                                        <TextBlock
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            Text="{x:Bind Name}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <ProgressBar
+                                            Maximum="1"
+                                            Minimum="0"
+                                            Value="{x:Bind Share}" />
+                                    </StackPanel>
+                                    <StackPanel
+                                        Grid.Column="1"
+                                        HorizontalAlignment="Right"
+                                        Spacing="2">
+                                        <TextBlock
+                                            HorizontalAlignment="Right"
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            Text="{x:Bind CostDisplay}" />
+                                        <TextBlock
+                                            HorizontalAlignment="Right"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Text="{x:Bind ShareDisplay}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <!--  Resources  -->
+            <Border
+                Grid.Column="1"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="16,16,16,8" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock
+                                Style="{StaticResource SubtitleTextBlockStyle}"
+                                Text="{x:Bind ViewModel.ResourcesHeader, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ViewModel.ResourcesSubheader, Mode=OneWay}" />
+                        </StackPanel>
+                        <ProgressRing
+                            Grid.Column="1"
+                            Width="20"
+                            Height="20"
+                            IsActive="{x:Bind ViewModel.IsLoadingResources, Mode=OneWay}" />
+                    </Grid>
+
+                    <ListView
+                        Grid.Row="1"
+                        Padding="8,0,8,8"
+                        ItemsSource="{x:Bind ViewModel.Resources, Mode=OneWay}"
+                        SelectionMode="None">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="12,10" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="models:ResourceRow">
+                                <Grid ColumnSpacing="16">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="180" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="2">
+                                        <TextBlock
+                                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                                            Text="{x:Bind Name}"
+                                            TextTrimming="CharacterEllipsis" />
+                                        <TextBlock
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Style="{StaticResource CaptionTextBlockStyle}"
+                                            Text="{x:Bind ResourceType}"
+                                            TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel
+                                        Grid.Column="1"
+                                        HorizontalAlignment="Right"
+                                        Spacing="6">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock
+                                                Grid.Column="0"
+                                                HorizontalAlignment="Right"
+                                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                Text="{x:Bind CostDisplay}" />
+                                            <TextBlock
+                                                Grid.Column="1"
+                                                MinWidth="36"
+                                                HorizontalAlignment="Right"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Style="{StaticResource CaptionTextBlockStyle}"
+                                                Text="{x:Bind ShareDisplay}" />
+                                        </Grid>
+                                        <ProgressBar
+                                            Maximum="1"
+                                            Minimum="0"
+                                            Value="{x:Bind Share}" />
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>
