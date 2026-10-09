@@ -10,6 +10,12 @@ public class ExpensesDbContext(DbContextOptions<ExpensesDbContext> options) : Db
     public DbSet<Invitation> Invitations => Set<Invitation>();
     public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<Merchant> Merchants => Set<Merchant>();
+    public DbSet<ValueTag> ValueTags => Set<ValueTag>();
+    public DbSet<Item> Items => Set<Item>();
+    public DbSet<ItemReceiptDescription> ItemReceiptDescriptions => Set<ItemReceiptDescription>();
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<LineItem> LineItems => Set<LineItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

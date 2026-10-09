@@ -37,6 +37,7 @@ builder.Services.AddCors(options =>
 builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
 builder.Services.AddSingleton<IExternalIdentityValidator, MicrosoftIdentityValidator>();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<ItemCatalog>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -94,6 +95,7 @@ app.MapMemberEndpoints();
 app.MapInvitationEndpoints();
 app.MapCategoryEndpoints();
 app.MapPaymentMethodEndpoints();
+app.MapExpenseEndpoints();
 
 app.Run();
 
