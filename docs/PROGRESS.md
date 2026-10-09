@@ -1,6 +1,6 @@
 # Progress and Handoff Notes
 
-**Last updated:** 2026-09-30
+**Last updated:** 2026-10-08
 **Read this first** when picking the project back up. Then [SPEC.md](../SPEC.md) (what we're building and every decision) and [FAQ.md](FAQ.md) (how-tos and fixes already worked out).
 
 ---
@@ -13,20 +13,29 @@ Step 5 (database) is **done and verified in production (2026-09-30).** Deploy ru
 
 Step 6 (members, sign-in, invitations, roles) — **Microsoft sign-in is done, deployed, and verified end to end in the browser (2026-09-30).** Signing in with Microsoft creates your household and makes you Parent; the API uses the database at runtime (members/invitations). Runtime managed-identity SQL access is therefore proven. **Google sign-in is the one remaining piece of step 6.**
 
+Step 7 (payment methods & categories) — **built and tested locally (2026-10-08); not yet deployed.** Entities `PaymentMethod` (label + type only, SPEC #12) and `Category`, household-scoped, Parent-only writes. New households are seeded with the default category list (SPEC feature 5); a parent reading an empty `/categories` backfills it, so the existing household gets defaults too. Web Settings tab manages both.
+
+Step 8 (manual expense entry) — **built and tested locally (2026-10-08); not yet deployed.** `Expense` + `LineItem` with per-line category, "for" (a member or Family), value tag, and notes; `Merchant` and `ValueTag` created on demand. A **lite item database** (`Item` + `ItemReceiptDescription`, part of step 10) is populated as you enter: you type the full item name and the app **figures out the receipt "short form"** for you (deterministic `ShortForm` generator, no AI — SPEC #16). `POST /expenses` sums the line amounts into the total. Web Expenses tab has the entry form and a recent-expenses list that shows each line's short form.
+
+**Local verification (2026-10-08):** API + web both build; 23 API tests pass (unit + end-to-end via `WebApplicationFactory`); all four EF migrations apply cleanly to LocalDB. **Not yet pushed/deployed** (awaiting user review, per the push agreement), and **not yet exercised in the browser against the real DB.**
+
 ---
 
 ## Next actions, in order
 
-**Pick up here next session.** The last open choice (asked at end of 2026-09-30 session, not yet answered): **finish step 6 with Google sign-in, or move to step 7.** Either is a clean starting point.
+**Pick up here next session.**
 
-1. **Option A — Finish step 6: Google sign-in.** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (validate Google ID token: issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret needed for GIS ID-token flow). Add a "Sign in with Google" button to the web app that gets an ID token and POSTs it to `/auth/session` with `provider: "Google"`. The provisioning logic, sessions, invitations, and roles already work provider-agnostically — only validation + a button are new. Put the Google client ID in non-secret config like the Microsoft one.
-2. **Option B — Step 7: payment methods & categories.** First real household data behind the new auth. Entities `PaymentMethod` (label + type, no card/account numbers — SPEC #12) and `Category` (with a default category list, SPEC feature 5), scoped to the signed-in household, Parent-only writes, + migration + endpoints + web screens.
-3. Continue down the build order.
+1. **Review and ship steps 7–8.** Read the four local commits (payment methods/categories backend, expense-entry backend, web UI, tests). When ready: `az login`, run the two new migrations against production either by deploying (the Deploy workflow applies `migrations script --idempotent` automatically) or via the FAQ's manual path, then **push** so CI → Deploy runs. After deploy, sign in and enter a test expense in the browser to verify end to end (mirrors how step 6 was confirmed).
+2. **Google sign-in (unfinished part of step 6).** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret for the GIS ID-token flow). Add a "Sign in with Google" button that POSTs the ID token to `/auth/session` with `provider: "Google"`. Provisioning/sessions/invitations/roles are already provider-agnostic — only validation + a button are new.
+3. **Step 9: Reports (basic)** — the next feature phase. Spending by category / who-it-was-for / payment method / merchant / item / value tag over a period; budget vs. actual comes later.
+4. Then the rest of the build order (finish the item database, receipt capture, budgets, …).
 
 ### Loose ends to tidy (non-blocking)
 
 - Doc-only commits still trigger a full redeploy (CI→Deploy on every push to `main`). The "deploy only changed parts" item is still open (see pending decisions).
-- Google sign-in (Option A above) is the only unfinished part of step 6.
+- Google sign-in (action 2 above) is the only unfinished part of step 6.
+- Expense **edit/delete** endpoints are not built yet (only create/list/get). Add when editing is needed.
+- Only the **lite** item database exists (full name → short form). Item merge, pictures, and editing (the rest of step 10) are still to come.
 
 ---
 
@@ -40,10 +49,10 @@ From SPEC.md "Build Order for Phase 1".
 - [x] **4. CD workflow**: `.github/workflows/deploy.yml`. It runs after CI passes on `main`, builds and pushes the API image, updates the Container App, uploads the web app, and smoke-tests both. The first run succeeded.
 - [x] **5. Database, core entities, and migrations in the pipeline** — *code committed; pipeline run not yet verified (see "Verify step 5").* EF Core 10 on the API, `ExpensesDbContext` + `Household` entity, initial migration, `dotnet-ef` as a local tool (`.config/dotnet-tools.json`), LocalDB for dev, and Deploy now grants the API identity's DB user and applies migrations before switching the image.
 - [~] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles** — *Microsoft sign-in built and **deployed** (2026-09-30); Google deferred; real browser sign-in test still pending.* API: token validation, Data Protection cookie sessions, first-sign-in bootstrap, Parent/Child authorization, members + invitations endpoints. Web: MSAL sign-in, dashboard (members, invitations with shareable links). Infra: Key Vault data-protection key + Crypto User + dataprotection blob container. Prod `/health` green; unauthenticated auth endpoints return 401.
-- [ ] 7. Payment methods and categories
-- [ ] 8. Manual expense entry with line items, "for" tagging, value tags, and notes
+- [~] **7. Payment methods and categories** — *built + tested locally (2026-10-08); not deployed.* Entities, migration, Parent-only endpoints (`/payment-methods`, `/categories`), default category seed/backfill, web Settings tab.
+- [~] **8. Manual expense entry with line items, "for" tagging, value tags, and notes** — *built + tested locally (2026-10-08); not deployed.* `Expense`/`LineItem`/`Merchant`/`ValueTag`, `POST/GET /expenses`, web entry form + list. Expense edit/delete not yet built.
 - [ ] 9. Reports (basic)
-- [ ] 10. Item database
+- [~] **10. Item database** — *lite version done as part of step 8:* `Item` + `ItemReceiptDescription` populated by manual entry, with the app figuring out the short form. Still to do: item merge, pictures, editing.
 - [ ] 11. Receipt capture, item matching, and "what is this item?" prompts
 - [ ] 12. Budgets and alerts (in-app, then email)
 - [ ] 13. Recurring bills
@@ -183,3 +192,9 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).
   - Fixed web sign-in (MSAL redirect flow + handleRedirectPromise) and **verified Microsoft sign-in end to end in the browser**. Step 6 Microsoft path complete; Google sign-in still to do.
+- **2026-10-08**:
+  - Built **step 7** (payment methods + categories): entities, `AddPaymentMethodsAndCategories` migration, Parent-only endpoints, default category seed on household bootstrap + idempotent backfill when a parent reads an empty list, web Settings tab.
+  - Built **step 8** (manual expense entry): `Expense`/`LineItem`/`Merchant`/`ValueTag` entities, `AddExpenseEntry` migration, `POST/GET /expenses` (Parent-only writes; the total is summed from the lines), web Expenses tab with an entry form and recent-expenses list. Dashboard reorganized into Expenses / Settings / Household tabs.
+  - Built a **lite item database** (step 10 start): `Item` + `ItemReceiptDescription` and a deterministic `ShortForm` generator, so typing a full item name makes the app "figure out the short form" and stores it per merchant for future receipt matching. No AI (SPEC #16).
+  - Added tests: `ShortForm`, `ItemCatalog`, default-category seeding, and **end-to-end expense API tests** through `WebApplicationFactory` (new `TestApiFactory` with an in-memory DB + stub parent auth in a "Testing" environment). 23 tests pass; all migrations apply cleanly to LocalDB.
+  - Recorded the design choices in SPEC Decisions #47–52 and added FAQ entries (Expense entry section). **Committed locally; not pushed** (awaiting review).

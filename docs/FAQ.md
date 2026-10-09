@@ -10,6 +10,7 @@ Newest questions are added to the relevant section. For how to run the app local
 - [GitHub](#github)
 - [Database](#database)
 - [Sign-in and identity](#sign-in-and-identity)
+- [Expense entry](#expense-entry)
 - [Security and secrets](#security-and-secrets)
 - [Visual Studio](#visual-studio)
 
@@ -319,6 +320,67 @@ Children are **view-only**: the `Parent` authorization policy guards every write
 ### How do I run and test sign-in locally?
 
 Copy `src/web/.env.example` to `src/web/.env.local` (both values are non-secret), create the local database (see the Database section), then run the API and web as usual. `http://localhost:5173` is already a redirect URI on the app registration, so Microsoft sign-in works locally. The API reads the client ID from `appsettings.json` (`Auth:Microsoft:ClientId`); locally, sessions use the default Data Protection key ring (Azure Blob/Key Vault are only wired when their config is present), so no Azure access is needed just to sign in.
+
+---
+
+## Expense entry
+
+Steps 7 and 8 added payment methods, categories, and manual expense entry. The web app's dashboard has three tabs: **Expenses** (enter + view), **Settings** (categories + payment methods), and **Household** (members + invitations). Only **parents** can enter or change anything; children are view-only.
+
+### How do I enter an expense in the web app?
+
+Sign in, go to the **Expenses** tab, and fill in the form:
+
+1. **Merchant** (e.g. `Costco`), **date** (defaults to today), and **payment method** (from the ones you created in Settings).
+2. A **default "for"** (Family, or a specific member) that pre-fills each new line — you can change it per line.
+3. One or more **items**, each with a description, category, who it was "for", quantity, unit price, an optional explicit amount (otherwise quantity × unit price), an optional **value tag**, and an optional note.
+4. **Save expense.** The total shown is the sum of the line amounts; the API recomputes it on save so it's authoritative.
+
+The saved expense appears in **Recent expenses** below the form, with each line's figured-out short form shown in brackets, e.g. `Kirkland Organic Eggs … [KIRKL ORGAN EGGS]`.
+
+A first-time household: the **Settings** tab starts with the default category list already seeded, but **no payment methods** — add at least one (e.g. "Discover card") before the entry form will let you save.
+
+### How does the app "figure out the short form"? (the `ShortForm` generator)
+
+When you type an item's **full name** during manual entry, the app derives a receipt-style **short form** (the `ItemReceiptDescription`) so future receipt scans (step 11) can match the item. It is deterministic, with **no AI** (SPEC #16 and #48): upper-case the name, turn punctuation into spaces, abbreviate any word longer than 5 letters to its first 5, and keep whole words up to 24 characters. For example:
+
+- `Kirkland Signature Organic Eggs, 24 ct` → `KIRKL SIGNA ORGAN EGGS`
+- `Milk` → `MILK`
+
+The logic lives in `src/api/Domain/ShortForm.cs`. You can override it by sending an explicit `shortForm` on a line; if two different items would get the same short form at one merchant, the later one is suffixed (`APPLE`, `APPLE 2`, …), because `(merchant, printed description)` is unique. Each manual line also resolves-or-creates an `Item` (by full name, per household), so the item database fills up as you enter — this is the "lite" start of step 10 (full name → short form only; item merge/pictures come later).
+
+### Where do categories come from, and how do I manage them?
+
+New households are seeded with a default list — Groceries, Dining out, Utilities, Household, Transportation, Entertainment, Health, Kids, Subscriptions (SPEC #47, `src/api/Domain/DefaultCategories.cs`). The household created before step 7 is **backfilled** the first time a parent opens Settings / calls `GET /categories` on an empty list (idempotent). Parents can add new categories and **archive/restore** them (archived categories stay on past line items but drop out of the entry-form picker). Renames are supported by the API (`PATCH /categories/{id}`) though the web app currently only adds and archives.
+
+### Why can't I store a card or account number on a payment method?
+
+By design (SPEC #12 / feature 1): a payment method is a **label and a type only** (`CreditCard`, `BankAccount`, `Cash`, `Other`) — e.g. "Discover card", credit card. There are deliberately no fields for card numbers, account numbers, or balances.
+
+### What are the new endpoints?
+
+All require a session cookie; writes require the `Parent` policy.
+
+| Method & path | Who | Purpose |
+|---|---|---|
+| `GET /categories` | any member | List categories (a parent on an empty list triggers the default backfill) |
+| `POST /categories`, `PATCH /categories/{id}` | Parent | Add; rename and/or archive |
+| `GET /payment-methods` | any member | List payment methods |
+| `POST /payment-methods`, `PATCH /payment-methods/{id}` | Parent | Add; rename, retype, archive |
+| `GET /expenses`, `GET /expenses/{id}` | any member | List (newest first, capped at 200) / read one, with readable names |
+| `POST /expenses` | Parent | Create an expense with line items; creates the merchant, items, and new value tags, and sums the total |
+
+### How do I run and test expense entry locally?
+
+Make sure the local database is up to date (the new migrations add the tables):
+
+```powershell
+dotnet ef database update --project src/api    # applies AddPaymentMethodsAndCategories + AddExpenseEntry
+dotnet run --project src/api                    # API on http://localhost:5080
+cd src/web; npm run dev                         # web on http://localhost:5173
+```
+
+Sign in with Microsoft (works locally — see Sign-in and identity), add a payment method in **Settings**, then enter an expense in **Expenses**. The API tests cover the endpoints without a browser or real sign-in: `ExpenseApiTests` drives the real pipeline through a `WebApplicationFactory` (`TestApiFactory`) that uses an in-memory database and a stub parent-auth scheme, running in a **"Testing"** environment so `Program` skips the SQL Server provider. Run everything with `dotnet test ExpensesApp.slnx`.
 
 ---
 
