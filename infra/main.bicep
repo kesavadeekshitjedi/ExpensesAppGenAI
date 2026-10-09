@@ -137,6 +137,8 @@ module api 'modules/containerApp.bicep' = {
         value: 'Server=tcp:${sql.outputs.serverFqdn},1433;Database=${sql.outputs.databaseName};Authentication=Active Directory Managed Identity;User Id=${apiIdentity.properties.clientId};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
       }
       { name: 'Cors__AllowedOrigins__0', value: 'https://${web.outputs.defaultHostname}' }
+      // Lock sign-in to specific accounts for now (empty would mean no restriction).
+      { name: 'Auth__AllowedEmails__0', value: 'kesavadeekshit@outlook.com' }
       { name: 'Storage__BlobEndpoint', value: storage.outputs.blobEndpoint }
       { name: 'DocumentIntelligence__Endpoint', value: documentIntelligence.outputs.endpoint }
       { name: 'Email__Endpoint', value: email.outputs.endpoint }

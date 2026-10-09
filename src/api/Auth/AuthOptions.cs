@@ -3,6 +3,10 @@ namespace Expenses.Api.Auth;
 public class AuthOptions
 {
     public MicrosoftAuthOptions Microsoft { get; set; } = new();
+
+    // When non-empty, only these email addresses may sign in (case-insensitive). Empty = no restriction
+    // (local dev and tests). Set in prod config to lock the app to specific accounts.
+    public string[] AllowedEmails { get; set; } = [];
 }
 
 public class MicrosoftAuthOptions

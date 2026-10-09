@@ -2,6 +2,7 @@ using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Expenses.Api.Tests;
 
@@ -14,6 +15,32 @@ public class AuthServiceTests
 
     private static ExternalIdentity Identity(string sub, string? name = "Alex", string? email = "alex@example.com") =>
         new(IdentityProvider.Microsoft, sub, email, name);
+
+    private static AuthService WithAllowlist(ExpensesDbContext db, params string[] allowed) =>
+        new(db, TimeProvider.System, Options.Create(new AuthOptions { AllowedEmails = allowed }));
+
+    [Fact]
+    public async Task Allowlist_BlocksEmailNotOnTheList()
+    {
+        using var db = NewDb();
+        var service = WithAllowlist(db, "owner@example.com");
+
+        var result = await service.SignInOrProvisionAsync(Identity("sub-x", email: "stranger@example.com"), null);
+
+        Assert.Equal(SignInOutcome.NotAllowed, result.Outcome);
+        Assert.Empty(db.Members);
+    }
+
+    [Fact]
+    public async Task Allowlist_AllowsListedEmail_CaseInsensitively()
+    {
+        using var db = NewDb();
+        var service = WithAllowlist(db, "Owner@Example.com");
+
+        var result = await service.SignInOrProvisionAsync(Identity("sub-1", email: "owner@example.com"), null);
+
+        Assert.Equal(SignInOutcome.SignedIn, result.Outcome);
+    }
 
     [Fact]
     public async Task FirstSignIn_CreatesHouseholdAndParent()

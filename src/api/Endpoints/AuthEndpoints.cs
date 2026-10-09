@@ -22,26 +22,41 @@ public static class AuthEndpoints
             IExternalIdentityValidator validator,
             AuthService auth,
             HttpContext http,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
+            // Audit log for App Insights: every sign-in attempt and its outcome, with the caller's IP.
+            var log = loggerFactory.CreateLogger("Expenses.Auth.SignIn");
+            var ip = http.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd) && fwd.Count > 0
+                ? fwd.ToString()
+                : http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
             var identity = await validator.ValidateAsync(request.Provider, request.Token, ct);
             if (identity is null)
             {
+                log.LogWarning("Sign-in rejected: invalid {Provider} token from {Ip}", request.Provider, ip);
                 return Results.Unauthorized();
             }
 
             var result = await auth.SignInOrProvisionAsync(identity, request.InvitationCode, ct);
             if (result.Outcome != SignInOutcome.SignedIn)
             {
+                log.LogWarning("Sign-in denied ({Outcome}) for {Email} via {Provider} from {Ip}",
+                    result.Outcome, identity.Email ?? "(no email)", identity.Provider, ip);
                 return Results.Problem(
                     statusCode: StatusCodes.Status403Forbidden,
-                    title: result.Outcome == SignInOutcome.InvalidInvitation
-                        ? "That invitation is invalid or has expired."
-                        : "An invitation is required to join a household.");
+                    title: result.Outcome switch
+                    {
+                        SignInOutcome.InvalidInvitation => "That invitation is invalid or has expired.",
+                        SignInOutcome.NotAllowed => "This account is not permitted to sign in.",
+                        _ => "An invitation is required to join a household.",
+                    });
             }
 
             var member = result.Member!;
             await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, BuildPrincipal(member));
+            log.LogInformation("Sign-in succeeded for {Email} (member {MemberId}, {Role}) via {Provider} from {Ip}",
+                member.Email ?? "(no email)", member.Id, member.Role, identity.Provider, ip);
             return Results.Ok(new MeResponse(member.Id, member.HouseholdId, member.Role.ToString(), member.DisplayName, member.Email));
         });
 

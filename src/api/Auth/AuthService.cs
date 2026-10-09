@@ -1,6 +1,7 @@
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace Expenses.Api.Auth;
 
@@ -9,12 +10,15 @@ public enum SignInOutcome
     SignedIn,
     NeedsInvitation,
     InvalidInvitation,
+    NotAllowed,
 }
 
 public record SignInResult(SignInOutcome Outcome, Member? Member);
 
-public class AuthService(ExpensesDbContext db, TimeProvider clock)
+public class AuthService(ExpensesDbContext db, TimeProvider clock, IOptions<AuthOptions>? options = null)
 {
+    private readonly string[] _allowedEmails = options?.Value.AllowedEmails ?? [];
+
     // Matches the identity to an existing member, or provisions one per the step 6 rules:
     // - existing identity -> sign in
     // - valid invitation code -> create the invited member and accept the invitation
@@ -22,6 +26,13 @@ public class AuthService(ExpensesDbContext db, TimeProvider clock)
     // - otherwise -> no access without an invitation
     public async Task<SignInResult> SignInOrProvisionAsync(ExternalIdentity identity, string? invitationCode, CancellationToken ct = default)
     {
+        // An email allowlist (when configured) gates every sign-in, before matching or provisioning.
+        if (_allowedEmails.Length > 0 &&
+            (identity.Email is null || !_allowedEmails.Contains(identity.Email, StringComparer.OrdinalIgnoreCase)))
+        {
+            return new SignInResult(SignInOutcome.NotAllowed, null);
+        }
+
         var existing = await db.Members.FirstOrDefaultAsync(
             m => m.Provider == identity.Provider && m.ExternalId == identity.Subject, ct);
         if (existing is not null)
