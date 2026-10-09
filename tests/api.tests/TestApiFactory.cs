@@ -8,6 +8,7 @@ using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Expenses.Api.TaxRates;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -55,6 +56,14 @@ public class TestApiFactory : WebApplicationFactory<Program>
                 o.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
                 o.DefaultChallengeScheme = TestAuthHandler.SchemeName;
             });
+
+            // Program pins the authorization policies to the cookie + bearer schemes; re-point them at the
+            // test scheme so the stub principal satisfies both the default and Parent-only policies.
+            services.AddAuthorizationBuilder()
+                .SetDefaultPolicy(new AuthorizationPolicyBuilder(TestAuthHandler.SchemeName).RequireAuthenticatedUser().Build())
+                .AddPolicy(AppClaims.ParentPolicy, p => p
+                    .AddAuthenticationSchemes(TestAuthHandler.SchemeName)
+                    .RequireClaim(AppClaims.Role, nameof(MemberRole.Parent)));
         });
     }
 

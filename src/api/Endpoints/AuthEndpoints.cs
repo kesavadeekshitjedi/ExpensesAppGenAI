@@ -10,6 +10,8 @@ public static class AuthEndpoints
 {
     public record SessionRequest(IdentityProvider Provider, string Token, string? InvitationCode);
     public record MeResponse(Guid MemberId, Guid HouseholdId, string Role, string DisplayName, string? Email);
+    public record RefreshRequest(string RefreshToken);
+    public record TokenResponse(string AccessToken, DateTimeOffset AccessExpiresAt, string RefreshToken, MeResponse Me);
 
     public static void MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
@@ -27,9 +29,7 @@ public static class AuthEndpoints
         {
             // Audit log for App Insights: every sign-in attempt and its outcome, with the caller's IP.
             var log = loggerFactory.CreateLogger("Expenses.Auth.SignIn");
-            var ip = http.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd) && fwd.Count > 0
-                ? fwd.ToString()
-                : http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var ip = ClientIp(http);
 
             var identity = await validator.ValidateAsync(request.Provider, request.Token, ct);
             if (identity is null)
@@ -60,6 +60,77 @@ public static class AuthEndpoints
             return Results.Ok(new MeResponse(member.Id, member.HouseholdId, member.Role.ToString(), member.DisplayName, member.Email));
         });
 
+        // Native mobile sign-in: same identity/allowlist checks as /session, but returns bearer tokens
+        // instead of setting a cookie.
+        group.MapPost("/token", async (
+            SessionRequest request,
+            IExternalIdentityValidator validator,
+            AuthService auth,
+            MobileTokenService tokens,
+            HttpContext http,
+            ILoggerFactory loggerFactory,
+            CancellationToken ct) =>
+        {
+            var log = loggerFactory.CreateLogger("Expenses.Auth.SignIn");
+            var ip = ClientIp(http);
+
+            var identity = await validator.ValidateAsync(request.Provider, request.Token, ct);
+            if (identity is null)
+            {
+                log.LogWarning("Mobile sign-in rejected: invalid {Provider} token from {Ip}", request.Provider, ip);
+                return Results.Unauthorized();
+            }
+
+            var result = await auth.SignInOrProvisionAsync(identity, request.InvitationCode, ct);
+            if (result.Outcome != SignInOutcome.SignedIn)
+            {
+                log.LogWarning("Mobile sign-in denied ({Outcome}) for {Email} via {Provider} from {Ip}",
+                    result.Outcome, identity.Email ?? "(no email)", identity.Provider, ip);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: result.Outcome switch
+                    {
+                        SignInOutcome.InvalidInvitation => "That invitation is invalid or has expired.",
+                        SignInOutcome.NotAllowed => "This account is not permitted to sign in.",
+                        _ => "An invitation is required to join a household.",
+                    });
+            }
+
+            var member = result.Member!;
+            var (accessToken, accessExpiresAt) = tokens.CreateAccessToken(member);
+            var refreshToken = await tokens.IssueRefreshTokenAsync(member.Id, ct);
+            log.LogInformation("Mobile sign-in succeeded for {Email} (member {MemberId}, {Role}) via {Provider} from {Ip}",
+                member.Email ?? "(no email)", member.Id, member.Role, identity.Provider, ip);
+            return Results.Ok(new TokenResponse(accessToken, accessExpiresAt, refreshToken, Me(member)));
+        });
+
+        // Exchange a valid refresh token for a new access + refresh token pair (the old refresh is revoked).
+        group.MapPost("/refresh", async (RefreshRequest request, MobileTokenService tokens, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.RefreshToken))
+            {
+                return Results.Unauthorized();
+            }
+            var member = await tokens.ConsumeRefreshTokenAsync(request.RefreshToken, ct);
+            if (member is null)
+            {
+                return Results.Unauthorized();
+            }
+            var (accessToken, accessExpiresAt) = tokens.CreateAccessToken(member);
+            var refreshToken = await tokens.IssueRefreshTokenAsync(member.Id, ct);
+            return Results.Ok(new TokenResponse(accessToken, accessExpiresAt, refreshToken, Me(member)));
+        });
+
+        // Mobile logout: revoke the refresh token so it can no longer be rotated.
+        group.MapPost("/mobile-logout", async (RefreshRequest request, MobileTokenService tokens, CancellationToken ct) =>
+        {
+            if (!string.IsNullOrWhiteSpace(request.RefreshToken))
+            {
+                await tokens.RevokeRefreshTokenAsync(request.RefreshToken, ct);
+            }
+            return Results.NoContent();
+        });
+
         group.MapGet("/me", (ClaimsPrincipal user) => Results.Ok(new MeResponse(
                 user.GetMemberId(),
                 user.GetHouseholdId(),
@@ -74,6 +145,14 @@ public static class AuthEndpoints
             return Results.NoContent();
         }).RequireAuthorization();
     }
+
+    private static MeResponse Me(Member member) =>
+        new(member.Id, member.HouseholdId, member.Role.ToString(), member.DisplayName, member.Email);
+
+    private static string ClientIp(HttpContext http) =>
+        http.Request.Headers.TryGetValue("X-Forwarded-For", out var fwd) && fwd.Count > 0
+            ? fwd.ToString()
+            : http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
     private static ClaimsPrincipal BuildPrincipal(Member member)
     {

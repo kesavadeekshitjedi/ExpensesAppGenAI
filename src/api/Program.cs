@@ -11,7 +11,9 @@ using Expenses.Api.FuelPrices;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Expenses.Api.TaxRates;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 
@@ -70,6 +72,8 @@ else
     builder.Services.AddSingleton<IFuelPriceProvider, NullFuelPriceProvider>();
 }
 
+builder.Services.AddScoped<MobileTokenService>();
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -82,10 +86,17 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // This is an API: answer with status codes instead of redirecting to a login page.
         options.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
         options.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
-    });
+    })
+    // Native mobile clients authenticate with a bearer access token instead of the session cookie.
+    .AddScheme<AuthenticationSchemeOptions, MobileBearerAuthenticationHandler>(MobileTokenService.BearerScheme, _ => { });
 
+// Protected endpoints accept either the web session cookie or a mobile bearer token.
+var cookieAndBearer = new[] { CookieAuthenticationDefaults.AuthenticationScheme, MobileTokenService.BearerScheme };
 builder.Services.AddAuthorizationBuilder()
-    .AddPolicy(AppClaims.ParentPolicy, policy => policy.RequireClaim(AppClaims.Role, nameof(MemberRole.Parent)));
+    .SetDefaultPolicy(new AuthorizationPolicyBuilder(cookieAndBearer).RequireAuthenticatedUser().Build())
+    .AddPolicy(AppClaims.ParentPolicy, policy => policy
+        .AddAuthenticationSchemes(cookieAndBearer)
+        .RequireClaim(AppClaims.Role, nameof(MemberRole.Parent)));
 
 // The managed-identity credential used to reach every Azure service (no secrets). Created once and
 // shared; only needed when some Azure endpoint is configured (absent locally and in tests).
