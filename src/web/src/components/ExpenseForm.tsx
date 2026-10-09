@@ -10,6 +10,9 @@ import {
 
 // The form keeps money/quantity fields as strings while typing (empty is allowed), then parses them
 // on submit. A line's `for` is a member id, or '' meaning Family (sent to the API as null).
+type MoneyField = 'quantity' | 'unitPrice' | 'amount'
+const MONEY_FIELDS: MoneyField[] = ['quantity', 'unitPrice', 'amount']
+
 type LineDraft = {
   description: string
   categoryId: string
@@ -17,23 +20,49 @@ type LineDraft = {
   quantity: string
   unitPrice: string
   amount: string
-  // True once the user types an amount by hand; until then the amount auto-fills from qty × unit price.
-  amountEdited: boolean
+  // The two money fields the user most recently specified (most-recent first). The remaining field is
+  // the one we auto-compute, so entering any two of {qty, unit price, amount} fills in the third —
+  // e.g. for gas, total + $/gal gives gallons.
+  recent: [MoneyField, MoneyField]
   valueTag: string
   notes: string
 }
 
 function emptyLine(categoryId: string, forMemberId: string): LineDraft {
-  return { description: '', categoryId, forMemberId, quantity: '1', unitPrice: '', amount: '', amountEdited: false, valueTag: '', notes: '' }
+  return {
+    description: '',
+    categoryId,
+    forMemberId,
+    quantity: '1',
+    unitPrice: '',
+    amount: '',
+    recent: ['unitPrice', 'quantity'], // so amount is the field computed from qty × unit price by default
+    valueTag: '',
+    notes: '',
+  }
 }
 
-// The amount is Qty × Unit price whenever a unit price is present; with no unit price there is nothing
-// to compute, so the amount is left for the user to type directly.
-function computeAmount(line: LineDraft): string {
-  const unit = parseMoney(line.unitPrice)
-  if (unit === null) return ''
-  const qty = parseMoney(line.quantity) ?? 1
-  return (qty * unit).toFixed(2)
+// Re-solve a line after the user edits one money field. The edited field becomes the most-recent; the
+// field that is neither of the two most-recent is recomputed from them when both have values.
+function solveLine(line: LineDraft, edited: MoneyField): LineDraft {
+  const second = line.recent[0] === edited ? line.recent[1] : line.recent[0]
+  const recent: [MoneyField, MoneyField] = [edited, second]
+  const derived = MONEY_FIELDS.find((f) => f !== recent[0] && f !== recent[1])!
+
+  const next: LineDraft = { ...line, recent }
+  const q = parseMoney(next.quantity)
+  const u = parseMoney(next.unitPrice)
+  const a = parseMoney(next.amount)
+
+  if (derived === 'amount' && q !== null && u !== null) {
+    next.amount = (q * u).toFixed(2)
+  } else if (derived === 'unitPrice' && a !== null && q) {
+    next.unitPrice = (a / q).toFixed(2)
+  } else if (derived === 'quantity' && a !== null && u) {
+    // Quantity (e.g. gallons) can be fractional; keep up to 3 decimals without trailing zeros.
+    next.quantity = String(Math.round((a / u) * 1000) / 1000)
+  }
+  return next
 }
 
 function today(): string {
@@ -78,25 +107,9 @@ export default function ExpenseForm({
   const updateLine = (index: number, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)))
 
-  // Changing qty or unit price re-fills the amount unless the user has typed one by hand.
-  const updateQtyOrPrice = (index: number, patch: Partial<LineDraft>) =>
-    setLines((prev) =>
-      prev.map((l, i) => {
-        if (i !== index) return l
-        const next = { ...l, ...patch }
-        return next.amountEdited ? next : { ...next, amount: computeAmount(next) }
-      }),
-    )
-
-  // Typing an amount pins it; clearing it resumes auto-fill from qty × unit price.
-  const updateAmount = (index: number, value: string) =>
-    setLines((prev) =>
-      prev.map((l, i) => {
-        if (i !== index) return l
-        if (value.trim() === '') return { ...l, amount: computeAmount(l), amountEdited: false }
-        return { ...l, amount: value, amountEdited: true }
-      }),
-    )
+  // Edit one of the three money fields; the solver recomputes whichever of the other two is "free".
+  const changeMoney = (index: number, field: MoneyField, value: string) =>
+    setLines((prev) => prev.map((l, i) => (i === index ? solveLine({ ...l, [field]: value }, field) : l)))
 
   const addLine = () => setLines((prev) => [...prev, emptyLine(firstCategoryId, defaultFor)])
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index))
@@ -249,11 +262,11 @@ export default function ExpenseForm({
           <div className="row">
             <label>
               Qty
-              <input type="number" step="1" min="0" value={line.quantity} onChange={(e) => updateQtyOrPrice(i, { quantity: e.target.value })} />
+              <input type="number" step="1" min="0" value={line.quantity} onChange={(e) => changeMoney(i, 'quantity', e.target.value)} />
             </label>
             <label>
               Unit price
-              <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => updateQtyOrPrice(i, { unitPrice: e.target.value })} />
+              <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => changeMoney(i, 'unitPrice', e.target.value)} />
             </label>
             <label>
               Amount
@@ -263,8 +276,8 @@ export default function ExpenseForm({
                 min="0"
                 required
                 value={line.amount}
-                onChange={(e) => updateAmount(i, e.target.value)}
-                placeholder="auto from qty × price"
+                onChange={(e) => changeMoney(i, 'amount', e.target.value)}
+                placeholder="auto from any two"
               />
             </label>
             <label>
@@ -302,7 +315,9 @@ export default function ExpenseForm({
         {saving ? 'Saving…' : 'Save expense'}
       </button>
       <p className="hint">
-        Tip: type the full item name and the app figures out its receipt short form for you.
+        Tip: type the full item name and the app figures out its receipt short form for you. Enter any
+        two of Qty / Unit price / Amount and the third fills in — e.g. for gas, total + price-per-gallon
+        gives the gallons.
       </p>
     </form>
   )
