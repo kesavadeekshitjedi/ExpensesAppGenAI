@@ -55,6 +55,15 @@ export type PaymentMethod = {
   archived: boolean
 }
 
+export type Vehicle = {
+  id: string
+  name: string
+  make: string | null
+  model: string | null
+  year: number | null
+  archived: boolean
+}
+
 // ----- Expenses (step 8) -----
 
 export type LineItem = {
@@ -71,6 +80,8 @@ export type LineItem = {
   notes: string | null
   itemId: string | null
   shortForm: string | null
+  vehicleId: string | null
+  vehicle: string | null
 }
 
 export type Expense = {
@@ -101,6 +112,7 @@ export type NewLineItem = {
   shortForm: string | null
   itemId?: string | null
   fullName?: string | null
+  vehicleId?: string | null
 }
 
 export type NewExpense = {
@@ -173,6 +185,14 @@ export const archiveCategory = (id: string, archived: boolean) =>
 export const archivePaymentMethod = (id: string, archived: boolean) =>
   apiFetch(`/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) })
 
+export const getVehicles = () => getJson<Vehicle[]>('/vehicles')
+
+export const createVehicle = (fields: { name: string; make?: string | null; model?: string | null; year?: number | null }) =>
+  apiFetch('/vehicles', { method: 'POST', body: JSON.stringify(fields) })
+
+export const archiveVehicle = (id: string, archived: boolean) =>
+  apiFetch(`/vehicles/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) })
+
 // ----- Item database (step 10) -----
 
 export type ReceiptDescription = {
@@ -242,6 +262,7 @@ export type ReportSummary = {
   byMerchant: Bucket[]
   byItem: Bucket[]
   byValueTag: Bucket[]
+  byVehicle: Bucket[]
 }
 
 // Both dates are optional; the API defaults to the current calendar month.

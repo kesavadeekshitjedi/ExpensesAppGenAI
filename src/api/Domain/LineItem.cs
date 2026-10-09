@@ -18,6 +18,9 @@ public class LineItem
     // Who the item was for: a specific household member, or Family when null.
     public Guid? ForMemberId { get; set; }
 
+    // The vehicle this line is a cost for (e.g. a gas fill-up), or null when it is not a per-car cost.
+    public Guid? VehicleId { get; set; }
+
     public decimal Quantity { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }

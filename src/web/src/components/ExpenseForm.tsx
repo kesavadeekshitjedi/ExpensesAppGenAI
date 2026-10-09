@@ -6,6 +6,7 @@ import {
   type Member,
   type NewLineItem,
   type PaymentMethod,
+  type Vehicle,
 } from '../api'
 
 // The form keeps money/quantity fields as strings while typing (empty is allowed), then parses them
@@ -24,6 +25,7 @@ type LineDraft = {
   // the one we auto-compute, so entering any two of {qty, unit price, amount} fills in the third —
   // e.g. for gas, total + $/gal gives gallons.
   recent: [MoneyField, MoneyField]
+  vehicleId: string // '' = not a per-vehicle cost
   valueTag: string
   notes: string
 }
@@ -37,6 +39,7 @@ function emptyLine(categoryId: string, forMemberId: string): LineDraft {
     unitPrice: '',
     amount: '',
     recent: ['unitPrice', 'quantity'], // so amount is the field computed from qty × unit price by default
+    vehicleId: '',
     valueTag: '',
     notes: '',
   }
@@ -78,17 +81,20 @@ export default function ExpenseForm({
   categories,
   paymentMethods,
   members,
+  vehicles,
   tagSuggestions,
   onSaved,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
   members: Member[]
+  vehicles: Vehicle[]
   tagSuggestions: string[]
   onSaved: (expense: Expense) => void
 }) {
   const activeCategories = categories.filter((c) => !c.archived)
   const activeMethods = paymentMethods.filter((p) => !p.archived)
+  const activeVehicles = vehicles.filter((v) => !v.archived)
   const firstCategoryId = activeCategories[0]?.id ?? ''
 
   const [merchant, setMerchant] = useState('')
@@ -138,6 +144,7 @@ export default function ExpenseForm({
         valueTag: l.valueTag.trim() === '' ? null : l.valueTag.trim(),
         notes: l.notes.trim() === '' ? null : l.notes.trim(),
         shortForm: null, // let the API figure out the short form
+        vehicleId: l.vehicleId === '' ? null : l.vehicleId,
       }))
 
     if (merchant.trim() === '') {
@@ -258,6 +265,19 @@ export default function ExpenseForm({
                 ))}
               </select>
             </label>
+            {activeVehicles.length > 0 && (
+              <label>
+                Vehicle
+                <select value={line.vehicleId} onChange={(e) => updateLine(i, { vehicleId: e.target.value })}>
+                  <option value="">— none —</option>
+                  {activeVehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <div className="row">
             <label>

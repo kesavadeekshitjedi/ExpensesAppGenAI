@@ -127,6 +127,7 @@ app.MapMemberEndpoints();
 app.MapInvitationEndpoints();
 app.MapCategoryEndpoints();
 app.MapPaymentMethodEndpoints();
+app.MapVehicleEndpoints();
 app.MapItemEndpoints();
 app.MapExpenseEndpoints();
 app.MapReceiptEndpoints();

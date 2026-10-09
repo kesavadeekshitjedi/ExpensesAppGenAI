@@ -19,7 +19,8 @@ public static class ExpenseEndpoints
         string? Notes,
         string? ShortForm,       // manual only; the app figures one out when blank
         Guid? ItemId = null,     // receipt: a chosen existing item for this printed line
-        string? FullName = null);// receipt: a new item's full name for this printed line
+        string? FullName = null, // receipt: a new item's full name for this printed line
+        Guid? VehicleId = null); // the vehicle this line is a cost for (e.g. gas), or null
 
     public record CreateExpenseRequest(
         string Merchant,
@@ -34,7 +35,7 @@ public static class ExpenseEndpoints
     public record LineItemResponse(
         Guid Id, string Description, Guid CategoryId, string Category, Guid? ForMemberId, string For,
         decimal Quantity, decimal UnitPrice, decimal Amount, string? ValueTag, string? Notes,
-        Guid? ItemId, string? ShortForm);
+        Guid? ItemId, string? ShortForm, Guid? VehicleId, string? Vehicle);
 
     public record ExpenseResponse(
         Guid Id, string Merchant, Guid PaymentMethodId, string PaymentMethod, DateOnly Date,
@@ -109,6 +110,9 @@ public static class ExpenseEndpoints
             var valueTagNames = await db.ValueTags.AsNoTracking()
                 .Where(t => t.HouseholdId == householdId)
                 .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+            var vehicleNames = await db.Vehicles.AsNoTracking()
+                .Where(v => v.HouseholdId == householdId)
+                .ToDictionaryAsync(v => v.Id, v => v.Name, ct);
 
             for (var i = 0; request.LineItems is not null && i < request.LineItems.Count; i++)
             {
@@ -124,6 +128,10 @@ public static class ExpenseEndpoints
                 if (line.ForMemberId is Guid forId && !memberNames.ContainsKey(forId))
                 {
                     errors[$"lineItems[{i}].forMemberId"] = ["That member is not in your household."];
+                }
+                if (line.VehicleId is Guid vehId && !vehicleNames.ContainsKey(vehId))
+                {
+                    errors[$"lineItems[{i}].vehicleId"] = ["That vehicle is not in your household."];
                 }
             }
 
@@ -197,6 +205,7 @@ public static class ExpenseEndpoints
                     UnitPrice = unitPrice,
                     Amount = amount,
                     ValueTagId = tagId,
+                    VehicleId = line.VehicleId,
                     Notes = Trimmed(line.Notes),
                 };
                 expense.LineItems.Add(lineItem);
@@ -242,7 +251,9 @@ public static class ExpenseEndpoints
                     lineTagNames.GetValueOrDefault(l.Id),
                     l.Notes,
                     l.ItemId,
-                    lineShortForms.GetValueOrDefault(l.Id)))
+                    lineShortForms.GetValueOrDefault(l.Id),
+                    l.VehicleId,
+                    l.VehicleId is Guid lv ? vehicleNames.GetValueOrDefault(lv) : null))
                     .ToList());
             return Results.Created($"/expenses/{expense.Id}", response);
         }).RequireAuthorization(AppClaims.ParentPolicy);
@@ -272,6 +283,7 @@ public static class ExpenseEndpoints
         var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
         var members = await db.Members.AsNoTracking().Where(m => m.HouseholdId == householdId).ToDictionaryAsync(m => m.Id, m => m.DisplayName, ct);
         var tags = await db.ValueTags.AsNoTracking().Where(t => t.HouseholdId == householdId).ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+        var vehicles = await db.Vehicles.AsNoTracking().Where(v => v.HouseholdId == householdId).ToDictionaryAsync(v => v.Id, v => v.Name, ct);
 
         var itemIds = expenses.SelectMany(e => e.LineItems).Where(l => l.ItemId is not null).Select(l => l.ItemId!.Value).Distinct().ToList();
         var shortForms = await db.ItemReceiptDescriptions.AsNoTracking()
@@ -306,7 +318,9 @@ public static class ExpenseEndpoints
                 l.ItemId,
                 l.ItemId is Guid it
                     ? shortForms.FirstOrDefault(d => d.ItemId == it && d.MerchantId == e.MerchantId)?.PrintedDescription
-                    : null))
+                    : null,
+                l.VehicleId,
+                l.VehicleId is Guid lv ? vehicles.GetValueOrDefault(lv) : null))
                 .ToList()))
             .ToList();
     }

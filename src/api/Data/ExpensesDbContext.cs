@@ -17,6 +17,7 @@ public class ExpensesDbContext(DbContextOptions<ExpensesDbContext> options) : Db
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<LineItem> LineItems => Set<LineItem>();
     public DbSet<Receipt> Receipts => Set<Receipt>();
+    public DbSet<Vehicle> Vehicles => Set<Vehicle>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

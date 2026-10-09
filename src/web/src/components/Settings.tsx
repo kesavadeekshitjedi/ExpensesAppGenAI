@@ -2,25 +2,31 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   archiveCategory,
   archivePaymentMethod,
+  archiveVehicle,
   createCategory,
   createPaymentMethod,
+  createVehicle,
   getCategories,
   getPaymentMethods,
+  getVehicles,
   paymentMethodTypes,
   type Category,
   type Me,
   type PaymentMethod,
   type PaymentMethodType,
+  type Vehicle,
 } from '../api'
 
 export default function Settings({ me }: { me: Me }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
     getCategories().then(setCategories).catch(() => {})
     getPaymentMethods().then(setPaymentMethods).catch(() => {})
+    getVehicles().then(setVehicles).catch(() => {})
   }, [])
 
   useEffect(load, [load])
@@ -68,7 +74,78 @@ export default function Settings({ me }: { me: Me }) {
         </ul>
         {isParent && <AddPaymentMethod onAdded={load} />}
       </section>
+
+      <section>
+        <h2>Vehicles</h2>
+        <p className="hint">Add your cars so gas and other per-car costs can be tracked and reported per vehicle.</p>
+        <ul>
+          {vehicles.map((v) => (
+            <li key={v.id}>
+              {v.name}
+              {(v.make || v.model || v.year) && (
+                <> — {[v.year, v.make, v.model].filter(Boolean).join(' ')}</>
+              )}
+              {v.archived && ' (archived)'}
+              {isParent && (
+                <>
+                  {' '}
+                  <button onClick={() => archiveVehicle(v.id, !v.archived).then(load)}>
+                    {v.archived ? 'Restore' : 'Archive'}
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        {isParent && <AddVehicle onAdded={load} />}
+      </section>
     </>
+  )
+}
+
+function AddVehicle({ onAdded }: { onAdded: () => void }) {
+  const [name, setName] = useState('')
+  const [make, setMake] = useState('')
+  const [model, setModel] = useState('')
+  const [year, setYear] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (name.trim() === '') return
+    const parsedYear = year.trim() === '' ? null : Number.parseInt(year, 10)
+    const res = await createVehicle({
+      name: name.trim(),
+      make: make.trim() || null,
+      model: model.trim() || null,
+      year: Number.isFinite(parsedYear) ? parsedYear : null,
+    })
+    if (res.ok) {
+      setName('')
+      setMake('')
+      setModel('')
+      setYear('')
+      setError(null)
+      onAdded()
+    } else {
+      setError('That vehicle already exists.')
+    }
+  }
+
+  return (
+    <div className="row">
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name e.g. Honda Pilot" />
+      <input value={make} onChange={(e) => setMake(e.target.value)} placeholder="Make (optional)" />
+      <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Model (optional)" />
+      <input
+        type="number"
+        value={year}
+        onChange={(e) => setYear(e.target.value)}
+        placeholder="Year"
+        style={{ width: '5rem' }}
+      />
+      <button onClick={submit}>Add</button>
+      {error && <p role="alert">{error}</p>}
+    </div>
   )
 }
 

@@ -36,5 +36,10 @@ public class LineItemConfiguration : IEntityTypeConfiguration<LineItem>
             .WithMany()
             .HasForeignKey(l => l.ValueTagId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne<Vehicle>()
+            .WithMany()
+            .HasForeignKey(l => l.VehicleId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

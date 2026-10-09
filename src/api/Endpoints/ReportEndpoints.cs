@@ -21,7 +21,8 @@ public static class ReportEndpoints
         List<Bucket> ByPaymentMethod,
         List<Bucket> ByMerchant,
         List<Bucket> ByItem,
-        List<Bucket> ByValueTag);
+        List<Bucket> ByValueTag,
+        List<Bucket> ByVehicle);
 
     public static void MapReportEndpoints(this IEndpointRouteBuilder app)
     {
@@ -61,6 +62,7 @@ public static class ReportEndpoints
             var members = await NameMap(db.Members.Where(m => m.HouseholdId == householdId), m => m.Id, m => m.DisplayName, ct);
             var items = await NameMap(db.Items.Where(i => i.HouseholdId == householdId), i => i.Id, i => i.FullName, ct);
             var tags = await NameMap(db.ValueTags.Where(t => t.HouseholdId == householdId), t => t.Id, t => t.Name, ct);
+            var vehicles = await NameMap(db.Vehicles.Where(v => v.HouseholdId == householdId), v => v.Id, v => v.Name, ct);
 
             // Flatten to (line, owning expense) so a line can see its expense's merchant / payment method.
             var lines = expenses.SelectMany(e => e.LineItems.Select(l => (line: l, expense: e))).ToList();
@@ -77,7 +79,8 @@ public static class ReportEndpoints
                 Group(lines, x => Name(methods, x.expense.PaymentMethodId)),
                 Group(lines, x => Name(merchants, x.expense.MerchantId)),
                 Group(lines, x => x.line.ItemId is Guid it ? Name(items, it) : x.line.Description),
-                Group(lines.Where(x => x.line.ValueTagId is not null), x => Name(tags, x.line.ValueTagId!.Value)));
+                Group(lines.Where(x => x.line.ValueTagId is not null), x => Name(tags, x.line.ValueTagId!.Value)),
+                Group(lines.Where(x => x.line.VehicleId is not null), x => Name(vehicles, x.line.VehicleId!.Value)));
 
             return Results.Ok(summary);
         });

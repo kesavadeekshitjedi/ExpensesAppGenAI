@@ -61,6 +61,7 @@ export default function Reports() {
               <Breakdown title="By payment method" buckets={summary.byPaymentMethod} total={summary.total} />
               <Breakdown title="By item" buckets={summary.byItem} total={summary.total} />
               <Breakdown title="By value tag" buckets={summary.byValueTag} total={summary.total} />
+              <Breakdown title="By vehicle" buckets={summary.byVehicle} total={summary.total} />
             </div>
           )}
         </>

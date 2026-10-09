@@ -3,11 +3,13 @@ import {
   getCategories,
   getExpenses,
   getPaymentMethods,
+  getVehicles,
   type Category,
   type Expense,
   type Me,
   type Member,
   type PaymentMethod,
+  type Vehicle,
 } from '../api'
 import ExpenseForm from './ExpenseForm'
 import ReceiptScan from './ReceiptScan'
@@ -15,17 +17,19 @@ import ReceiptScan from './ReceiptScan'
 export default function Expenses({ me, members }: { me: Me; members: Member[] }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
+  const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
   const [entryMode, setEntryMode] = useState<'manual' | 'receipt'>('manual')
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
-    Promise.all([getCategories(), getPaymentMethods(), getExpenses()])
-      .then(([c, p, e]) => {
+    Promise.all([getCategories(), getPaymentMethods(), getExpenses(), getVehicles()])
+      .then(([c, p, e, v]) => {
         setCategories(c)
         setPaymentMethods(p)
         setExpenses(e)
+        setVehicles(v)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -61,6 +65,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               categories={categories}
               paymentMethods={paymentMethods}
               members={members}
+              vehicles={vehicles}
               tagSuggestions={tagSuggestions}
               onSaved={onSaved}
             />
@@ -94,6 +99,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
                   {e.lineItems.map((l) => (
                     <li key={l.id}>
                       {l.description} — {l.category} · for {l.for} · {l.amount.toFixed(2)}
+                      {l.vehicle && <> · 🚗 {l.vehicle}</>}
                       {l.valueTag && <> · {l.valueTag}</>}
                       {l.shortForm && <span className="short-form"> [{l.shortForm}]</span>}
                       {l.notes && <div className="line-note">{l.notes}</div>}
