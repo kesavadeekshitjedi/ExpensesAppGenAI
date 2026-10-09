@@ -391,6 +391,56 @@ Sign in with Microsoft (works locally — see Sign-in and identity), add a payme
 
 ---
 
+## Item database (step 10)
+
+### What is the item database and how does it get built?
+
+The **Items** tab is the household's item database (SPEC feature 3). You don't fill it in by hand — it is built up automatically as you enter expenses and scan receipts. Each **item** has a full name (e.g. "Kirkland Signature Organic Eggs, 24 ct"), an optional default category, an optional default value tag, an optional picture, and one **receipt short form per merchant** (how that store prints it, e.g. Costco → `KIRKL ORGAN EGGS`). When you enter a line, the API finds or creates the item by full name and records the merchant's short form; receipt scanning records the actual printed text. That is what lets a later receipt match automatically.
+
+### What can a parent do to an item?
+
+In the **Items** tab (parents only; children can browse):
+
+| Action | Endpoint | Notes |
+|---|---|---|
+| Search / list | `GET /items?search=` | Case-insensitive on the full name |
+| Rename, set default category, set/clear default value tag | `PATCH /items/{id}` | Name is unique per household; a typed value tag is created if new |
+| Add a picture | `POST /items/{id}/picture` | `multipart/form-data`; `GET /items/{id}/picture` streams it back |
+| Merge a duplicate into another | `POST /items/{id}/merge` | Moves the source's receipt short forms and line-item links to the target, then deletes the source |
+
+The **default value tag** is applied automatically to a matched line when you scan a receipt (you can still change it per line).
+
+### Why aren't item pictures resized on the server?
+
+The SPEC lists resizing as a *proposed* optimization. We store the original upload (capped at 10 MB, with the file sniffed to confirm it's a real image) and skip server-side resizing, because the obvious .NET resizer, **ImageSharp**, is awkward here: v4.x refuses to build in **Release** without a purchased/registered license key (which the Deploy workflow builds would hit), and the older v3.1.x line that needs no key has known high-severity CVEs. Rather than ship either, pictures are kept as-is. If real resizing is wanted later, **SkiaSharp** (with `SkiaSharp.NativeAssets.Linux` for the container) has no license key and no outstanding CVEs — add it then. Pictures are served **through the API** (`GET /items/{id}/picture`), not via a public blob URL, because the storage account has public blob access disabled; the web app fetches them with credentials and shows them via object URLs.
+
+## Receipt capture (step 11)
+
+### How does scanning a receipt work, end to end?
+
+In **Expenses → Scan a receipt**, you take/choose a photo (on a phone the camera opens directly — `<input type="file" accept="image/*" capture>`). The web app POSTs it to `POST /receipts/scan` (parents only). The API:
+
+1. stores the original image in the `receipts` blob container (kept **indefinitely** — SPEC Open Question #6);
+2. reads it with **Azure AI Document Intelligence** (`prebuilt-receipt` model) — text only, no AI interpretation of what items *are* (SPEC decision #16);
+3. matches each printed line against that merchant's known receipt short forms in the item database;
+4. returns a **draft**: merchant, date, total, tax, and a line per item — each marked matched (prefilled with the item's name, default category and value tag) or unmatched (asking "what is this item?"). The extracted total vs. the line-sum **difference** is shown so a misread is obvious.
+
+**Nothing is saved to the database at scan time** except the image blob. You review the draft, name any unmatched items, set who each line was "for", fix amounts, and **Save**. Saving calls `POST /expenses` with `source: "Receipt"` and the `receiptBlobName`; the API links a `Receipt` row to the new expense and records each printed description against its item, so the same line is recognized automatically next time.
+
+### How are receipt lines matched to items, and how do I name an unknown one?
+
+Matching is a case-insensitive lookup of the **printed text** against `ItemReceiptDescription` rows for that merchant. A hit fills in the item. For a miss, you type the item's **full name** in the draft; because item names are unique per household, typing a name that already exists **reuses** that item, and a new name **creates** one (`ItemCatalog.ResolveFromReceiptAsync`). You can also leave a line unnamed — it saves with just its printed text, to be identified later (SPEC feature 3). There is no separate "pick from a list by id" step in the web app: the full-name field (with autocomplete over existing items) covers both reuse and creation.
+
+### Does receipt reading cost anything?
+
+No, at this volume. The Document Intelligence resource (`di-expenses-…`) is on the **F0 free tier** — 500 pages/month, which is far more than a family uses. It was already provisioned by `infra/modules/documentIntelligence.bicep`; the API reaches it through its managed identity (`Cognitive Services User`), no key. If usage ever exceeded the free tier you'd switch the `documentIntelligenceSku` param to `S0` (pay per page) — a parent decision.
+
+### How do I run and test receipt capture locally?
+
+Document Intelligence and Blob Storage are Azure services, so locally (no `DocumentIntelligence:Endpoint` / `Storage:BlobEndpoint`) the API registers no-op stand-ins and scanning returns a clear "not configured" error — manual entry and the rest of the app still work. To exercise the real flow, run against the deployed API, or temporarily point `DocumentIntelligence__Endpoint` and `Storage__BlobEndpoint` at the real resources (you're signed in via `az login`, which `DefaultAzureCredential` uses). The API tests cover the flow without Azure: `ReceiptApiTests` injects a **stub reader** (canned extraction) and the in-memory **blob fake** from `TestApiFactory`, then drives scan → review → save and asserts the expense, the `Receipt` row, and the new item receipt descriptions.
+
+---
+
 ## Security and secrets
 
 ### How do we avoid ever needing client secrets?

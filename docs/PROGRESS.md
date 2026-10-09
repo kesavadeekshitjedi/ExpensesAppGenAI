@@ -1,6 +1,6 @@
 # Progress and Handoff Notes
 
-**Last updated:** 2026-10-08
+**Last updated:** 2026-10-09
 **Read this first** when picking the project back up. Then [SPEC.md](../SPEC.md) (what we're building and every decision) and [FAQ.md](FAQ.md) (how-tos and fixes already worked out).
 
 ---
@@ -23,6 +23,11 @@ Step 9 (reports, basic) — **built and tested locally (2026-10-08).** `GET /rep
 
 **Deploy confirmed (2026-10-09):** CI run `37877610429` and Deploy run `37877723193` both succeeded. The Deploy job generated the idempotent migration script, ran `create-api-user.sql` and `migrate.sql` against prod SQL cleanly (two `(1 row affected)`, no retries — so `AddPaymentMethodsAndCategories` and `AddExpenseEntry` applied), switched the Container App to image `936c42e…`, and the smoke test passed. Production `/health` returns `Healthy`. **Still not exercised in the browser against the real DB** — the in-browser check (sign in → add payment method → enter an expense → open Reports) is the one remaining confirmation for steps 7–9.
 
+Step 10 (item database — full) and Step 11 (receipt capture) — **built and tested locally (2026-10-09); not yet deployed.** The user chose to do 10 then 11, Google last.
+- **Step 10:** `Items` tab + `/items` endpoints (list/search, get, Parent-only PATCH, picture upload/stream, merge). `Item` gained `DefaultValueTagId` + `PictureBlobName` (migration `AddItemPicturesAndDefaultTag`). A **blob storage abstraction** (`IBlobStorage` → Azure/Null) was added, guarded on `Storage:BlobEndpoint`. **Item pictures are stored as-is (no server-side resize)** — ImageSharp 4.x needs a Release license and 3.1.x has high-severity CVEs; SkiaSharp is the documented future option (SPEC #54, FAQ → Item database).
+- **Step 11:** `Expenses → Scan a receipt`. `POST /receipts/scan` (Parent) stores the image in the `receipts` container and reads it with **Document Intelligence** (`prebuilt-receipt`, F0 free tier) behind `IReceiptReader` (Azure/Null/stub), matches printed lines to the item DB, and returns a draft (with the total-vs-lines difference). Nothing is saved until the user reviews; saving goes through `POST /expenses` (extended with `source="Receipt"`, `receiptBlobName`, per-line `itemId`/`fullName`), which links a `Receipt` row (migration `AddReceipts`) and records each printed description against its item (SPEC #55, FAQ → Receipt capture).
+- **Local verification (2026-10-09):** API + web build and lint clean; **35 API tests pass** (added item + receipt tests via an in-memory blob fake and a stub reader); all six migrations apply cleanly to LocalDB; `az bicep build` still compiles (no infra change). **Not pushed yet** (awaiting user review/decision to push).
+
 ---
 
 ## Next actions, in order
@@ -30,16 +35,16 @@ Step 9 (reports, basic) — **built and tested locally (2026-10-08).** `GET /rep
 **Pick up here next session.**
 
 1. **Browser-verify steps 7–9.** Deploy is confirmed (run `37877723193`; both migrations applied to prod — see "Deploy confirmed" above). Remaining: sign in and add a payment method, enter an expense, open the Reports tab (mirrors how step 6 was confirmed). This needs the user's interactive Microsoft sign-in.
-2. **Google sign-in (unfinished part of step 6).** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret for the GIS ID-token flow). Add a "Sign in with Google" button that POSTs the ID token to `/auth/session` with `provider: "Google"`. Provisioning/sessions/invitations/roles are already provider-agnostic — only validation + a button are new.
-3. **Finish the item database (step 10)** or move to **receipt capture (step 11)** — pick with the user. The lite item DB (full name → short form) already exists.
+2. **Push steps 7–11 and verify in the browser.** Steps 10–11 are committed locally but **not pushed**. When the user says to push, CI → Deploy applies `AddItemPicturesAndDefaultTag` + `AddReceipts` and ships API + web. Then browser-verify: Items tab (edit an item, set a default tag, upload a picture, merge two items) and Expenses → Scan a receipt (upload a real receipt image, confirm extraction/matching, name an unknown item, see the difference line, save; check it lands as `source=receipt`). The scan path is the first real exercise of Document Intelligence + Blob in production.
+3. **Google sign-in (unfinished part of step 6 — the user wants this last).** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret for the GIS ID-token flow). Add a "Sign in with Google" button that POSTs the ID token to `/auth/session` with `provider: "Google"`. Provisioning/sessions/invitations/roles are already provider-agnostic — only validation + a button are new.
 4. Then the rest of the build order (budgets, recurring bills, price comparison, flags, predictions).
 
 ### Loose ends to tidy (non-blocking)
 
 - Doc-only commits still trigger a full redeploy (CI→Deploy on every push to `main`). The "deploy only changed parts" item is still open (see pending decisions).
 - Google sign-in (action 2 above) is the only unfinished part of step 6.
-- Expense **edit/delete** endpoints are not built yet (only create/list/get). Add when editing is needed.
-- Only the **lite** item database exists (full name → short form). Item merge, pictures, and editing (the rest of step 10) are still to come.
+- Expense **edit/delete** endpoints are not built yet (only create/list/get). Add when editing is needed. Note receipt scans can leave an **orphan image blob** if the user abandons the draft (image is uploaded at scan time, before the expense is saved) — acceptable at this volume; a cleanup pass can be added later.
+- **Item pictures are not resized** on the server (stored as-is, 10 MB cap). If this becomes a page-load/storage concern, add **SkiaSharp** (+ `SkiaSharp.NativeAssets.Linux`) — see SPEC #54 / FAQ for why not ImageSharp.
 
 ---
 
@@ -56,8 +61,8 @@ From SPEC.md "Build Order for Phase 1".
 - [~] **7. Payment methods and categories** — *built + tested locally (2026-10-08); not deployed.* Entities, migration, Parent-only endpoints (`/payment-methods`, `/categories`), default category seed/backfill, web Settings tab.
 - [~] **8. Manual expense entry with line items, "for" tagging, value tags, and notes** — *built + tested locally (2026-10-08); not deployed.* `Expense`/`LineItem`/`Merchant`/`ValueTag`, `POST/GET /expenses`, web entry form + list. Expense edit/delete not yet built.
 - [x] **9. Reports (basic)** — *built + tested locally (2026-10-08); pushed.* `GET /reports/summary`, web Reports tab. Budget-vs-actual deferred to step 12 (budgets).
-- [~] **10. Item database** — *lite version done as part of step 8:* `Item` + `ItemReceiptDescription` populated by manual entry, with the app figuring out the short form. Still to do: item merge, pictures, editing.
-- [ ] 11. Receipt capture, item matching, and "what is this item?" prompts
+- [x] **10. Item database** — *built + tested locally (2026-10-09); not deployed.* `Items` tab + `/items` endpoints: list/search, Parent-only edit (name, default category, default value tag), picture upload/stream, and merge. `Item.DefaultValueTagId`/`PictureBlobName` + migration. Pictures stored as-is (no resize — see SPEC #54).
+- [x] **11. Receipt capture, item matching, and "what is this item?" prompts** — *built + tested locally (2026-10-09); not deployed.* `POST /receipts/scan` (image → blob + Document Intelligence → matched draft), review UI, save via `POST /expenses` `source="Receipt"`, `Receipt` entity + migration. SPEC #55.
 - [ ] 12. Budgets and alerts (in-app, then email)
 - [ ] 13. Recurring bills
 - [ ] 14. Item price comparison
@@ -204,3 +209,9 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Recorded the design choices in SPEC Decisions #47–52 and added FAQ entries (Expense entry section).
   - Built **step 9** (basic reports): `GET /reports/summary` with period total and breakdowns by category / for / payment method / merchant / item / value tag (no schema change), web **Reports** tab with a date range. Added report API tests (25 tests total). SPEC #53; FAQ → Reports.
   - **Pushed** (user asked to "do the reports and push"): steps 7–9 go out together, CI → Deploy applies the two migrations and ships API + web. Browser verification against production still pending.
+- **2026-10-09**:
+  - Confirmed the **steps 7–9 deploy** (CI `37877610429` → Deploy `37877723193`): both migrations applied to prod, image `936c42e`, `/health` green. Browser check still the user's to do.
+  - Chose the next build with the user: **step 10 then step 11**, Google sign-in last.
+  - Built **step 10 (full item database)**: `/items` endpoints (list/search, edit, picture, merge), `Item.DefaultValueTagId`/`PictureBlobName` + `AddItemPicturesAndDefaultTag`, an `IBlobStorage` abstraction, and the web **Items** tab. Dropped ImageSharp (Release-license/CVE problems) — pictures stored as-is.
+  - Built **step 11 (receipt capture)**: `POST /receipts/scan` (blob + Document Intelligence `prebuilt-receipt` behind `IReceiptReader`), item matching + "what is this item?" draft review, save via `POST /expenses` `source="Receipt"`, `Receipt` entity + `AddReceipts`, web **Scan a receipt** flow.
+  - 35 API tests pass (added item + receipt suites with an in-memory blob fake and stub reader); all six migrations apply to LocalDB; bicep still compiles. Recorded SPEC #54–55 (answered Open Question #6) and FAQ → Item database / Receipt capture. **Committed locally in four commits; not pushed** (awaiting user review).
