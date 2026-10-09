@@ -10,12 +10,14 @@ import {
   type PaymentMethod,
 } from '../api'
 import ExpenseForm from './ExpenseForm'
+import ReceiptScan from './ReceiptScan'
 
 export default function Expenses({ me, members }: { me: Me; members: Member[] }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [loading, setLoading] = useState(true)
+  const [entryMode, setEntryMode] = useState<'manual' | 'receipt'>('manual')
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
@@ -45,14 +47,31 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
     <>
       {isParent ? (
         <section>
-          <h2>Enter an expense</h2>
-          <ExpenseForm
-            categories={categories}
-            paymentMethods={paymentMethods}
-            members={members}
-            tagSuggestions={tagSuggestions}
-            onSaved={onSaved}
-          />
+          <h2>Add an expense</h2>
+          <div className="row entry-toggle">
+            <button aria-pressed={entryMode === 'manual'} onClick={() => setEntryMode('manual')}>
+              Enter manually
+            </button>
+            <button aria-pressed={entryMode === 'receipt'} onClick={() => setEntryMode('receipt')}>
+              Scan a receipt
+            </button>
+          </div>
+          {entryMode === 'manual' ? (
+            <ExpenseForm
+              categories={categories}
+              paymentMethods={paymentMethods}
+              members={members}
+              tagSuggestions={tagSuggestions}
+              onSaved={onSaved}
+            />
+          ) : (
+            <ReceiptScan
+              categories={categories}
+              paymentMethods={paymentMethods}
+              members={members}
+              onSaved={onSaved}
+            />
+          )}
         </section>
       ) : (
         <p>Children can view expenses but not enter them.</p>

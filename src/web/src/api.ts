@@ -88,6 +88,7 @@ export type Expense = {
 }
 
 // What the entry form sends for one line. The API fills in the item link and short form.
+// For a receipt line, `description` is the printed text and `fullName` names the item (new or reused).
 export type NewLineItem = {
   description: string
   categoryId: string
@@ -98,6 +99,8 @@ export type NewLineItem = {
   valueTag: string | null
   notes: string | null
   shortForm: string | null
+  itemId?: string | null
+  fullName?: string | null
 }
 
 export type NewExpense = {
@@ -107,6 +110,44 @@ export type NewExpense = {
   tax: number | null
   notes: string | null
   lineItems: NewLineItem[]
+  source?: string
+  receiptBlobName?: string
+}
+
+// ----- Receipt capture (step 11) -----
+
+export type ScanLine = {
+  printedDescription: string
+  quantity: number
+  unitPrice: number
+  amount: number
+  matched: boolean
+  itemId: string | null
+  itemFullName: string | null
+  suggestedCategoryId: string | null
+  suggestedValueTag: string | null
+}
+
+export type ScanResult = {
+  receiptBlobName: string
+  merchant: string | null
+  date: string | null
+  total: number | null
+  tax: number | null
+  lineSum: number
+  difference: number
+  lines: ScanLine[]
+}
+
+// Uploads a receipt image (multipart) and returns the extracted, matched draft for review.
+export async function scanReceipt(file: File): Promise<ScanResult> {
+  const body = new FormData()
+  body.append('file', file)
+  const res = await fetch(`${apiBaseUrl}/receipts/scan`, { method: 'POST', credentials: 'include', body })
+  if (res.ok) return (await res.json()) as ScanResult
+  const problem = (await res.json().catch(() => null)) as { title?: string; errors?: Record<string, string[]> } | null
+  const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
+  throw new Error(firstError ?? problem?.title ?? 'Could not read that receipt.')
 }
 
 // Small typed wrappers over apiFetch, so components don't repeat URLs and JSON handling.
