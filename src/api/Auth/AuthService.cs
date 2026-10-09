@@ -81,6 +81,9 @@ public class AuthService(ExpensesDbContext db, TimeProvider clock)
         };
         db.Households.Add(household);
 
+        // Every new household starts with the default category list (SPEC feature 5).
+        db.Categories.AddRange(DefaultCategories.For(household.Id));
+
         var member = new Member
         {
             Id = Guid.NewGuid(),

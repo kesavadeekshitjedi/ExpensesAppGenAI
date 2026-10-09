@@ -92,6 +92,8 @@ app.MapHealthChecks("/health");
 app.MapAuthEndpoints();
 app.MapMemberEndpoints();
 app.MapInvitationEndpoints();
+app.MapCategoryEndpoints();
+app.MapPaymentMethodEndpoints();
 
 app.Run();
 

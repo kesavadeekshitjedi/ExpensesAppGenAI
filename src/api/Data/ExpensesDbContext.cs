@@ -8,6 +8,8 @@ public class ExpensesDbContext(DbContextOptions<ExpensesDbContext> options) : Db
     public DbSet<Household> Households => Set<Household>();
     public DbSet<Member> Members => Set<Member>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
+    public DbSet<PaymentMethod> PaymentMethods => Set<PaymentMethod>();
+    public DbSet<Category> Categories => Set<Category>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

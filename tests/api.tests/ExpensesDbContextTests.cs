@@ -19,4 +19,13 @@ public class ExpensesDbContextTests
         Assert.Equal("Households", household.GetTableName());
         Assert.Equal(200, household.FindProperty(nameof(Household.Name))!.GetMaxLength());
     }
+
+    [Fact]
+    public void Model_MapsCategoryAndPaymentMethod()
+    {
+        using var context = new ExpensesDbContextFactory().CreateDbContext([]);
+
+        Assert.Equal("Categories", context.Model.FindEntityType(typeof(Category))!.GetTableName());
+        Assert.Equal("PaymentMethods", context.Model.FindEntityType(typeof(PaymentMethod))!.GetTableName());
+    }
 }

@@ -30,6 +30,19 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task FirstSignIn_SeedsTheDefaultCategoryList()
+    {
+        using var db = NewDb();
+        var service = new AuthService(db, TimeProvider.System);
+
+        var result = await service.SignInOrProvisionAsync(Identity("sub-1"), invitationCode: null);
+
+        var categories = db.Categories.Where(c => c.HouseholdId == result.Member!.HouseholdId).ToList();
+        Assert.Equal(DefaultCategories.Names.Length, categories.Count);
+        Assert.Contains(categories, c => c.Name == "Groceries");
+    }
+
+    [Fact]
     public async Task ExistingIdentity_SignsInWithoutCreatingAnother()
     {
         using var db = NewDb();
