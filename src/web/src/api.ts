@@ -248,6 +248,22 @@ export async function getItemPictureUrl(id: string): Promise<string | null> {
   return URL.createObjectURL(await res.blob())
 }
 
+// The most recent purchase of an item, for the "last price / % change" banner during entry.
+export type LastPrice = {
+  fullName: string
+  unitPrice: number
+  amount: number
+  quantity: number
+  date: string
+  merchant: string
+}
+
+export async function getItemLastPrice(name: string): Promise<LastPrice | null> {
+  const res = await apiFetch(`/items/last-price?name=${encodeURIComponent(name)}`)
+  if (res.status === 204 || !res.ok) return null
+  return (await res.json()) as LastPrice
+}
+
 // ----- Reports (step 9) -----
 
 export type Bucket = {

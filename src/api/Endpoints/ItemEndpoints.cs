@@ -26,6 +26,9 @@ public static class ItemEndpoints
 
     public record MergeItemRequest(Guid SourceItemId);
 
+    // The most recent purchase of an item, for the "last price / % change" banner during entry.
+    public record LastPriceResponse(string FullName, decimal UnitPrice, decimal Amount, decimal Quantity, DateOnly Date, string Merchant);
+
     public static void MapItemEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/items").RequireAuthorization();
@@ -46,6 +49,38 @@ public static class ItemEndpoints
 
             var items = await query.OrderBy(i => i.FullName).Take(500).ToListAsync(ct);
             return Results.Ok(await ToResponses(db, householdId, items, ct));
+        });
+
+        // The most recent purchase of an item by full name, so the entry form can show the last price and
+        // the % change. 204 when the item is unknown or has no priced history. Readable by all members.
+        group.MapGet("/last-price", async (string? name, ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return Results.NoContent();
+            }
+            var householdId = user.GetHouseholdId();
+            var trimmed = name.Trim().ToLower();
+            var item = await db.Items.AsNoTracking()
+                .FirstOrDefaultAsync(i => i.HouseholdId == householdId && i.FullName.ToLower() == trimmed, ct);
+            if (item is null)
+            {
+                return Results.NoContent();
+            }
+
+            var last = await (from l in db.LineItems.AsNoTracking()
+                              join e in db.Expenses.AsNoTracking() on l.ExpenseId equals e.Id
+                              where l.ItemId == item.Id && e.HouseholdId == householdId
+                              orderby e.Date descending, e.CreatedAt descending
+                              select new { l.UnitPrice, l.Amount, l.Quantity, e.Date, e.MerchantId }).FirstOrDefaultAsync(ct);
+            if (last is null)
+            {
+                return Results.NoContent();
+            }
+
+            var merchant = await db.Merchants.AsNoTracking()
+                .Where(m => m.Id == last.MerchantId).Select(m => m.Name).FirstOrDefaultAsync(ct);
+            return Results.Ok(new LastPriceResponse(item.FullName, last.UnitPrice, last.Amount, last.Quantity, last.Date, merchant ?? ""));
         });
 
         group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>

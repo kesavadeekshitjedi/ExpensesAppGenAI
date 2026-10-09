@@ -2,10 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react'
 import {
   createExpense,
   getFuelPrice,
+  getItemLastPrice,
   getTaxRate,
   type Category,
   type Expense,
   type FuelPrice,
+  type LastPrice,
   type Member,
   type NewLineItem,
   type PaymentMethod,
@@ -80,12 +82,47 @@ function parseMoney(value: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// Percent change of the line's current price vs the item's last price — by unit price when both are
+// present, otherwise by total amount. Null when there's nothing comparable entered yet.
+function priceChange(line: LineDraft, last: LastPrice): { pct: number } | null {
+  const curUnit = parseMoney(line.unitPrice)
+  if (last.unitPrice > 0 && curUnit !== null && curUnit > 0) {
+    return { pct: ((curUnit - last.unitPrice) / last.unitPrice) * 100 }
+  }
+  const curAmt = parseMoney(line.amount)
+  if (last.amount > 0 && curAmt !== null && curAmt > 0) {
+    return { pct: ((curAmt - last.amount) / last.amount) * 100 }
+  }
+  return null
+}
+
+function PriceBanner({ line, last }: { line: LineDraft; last: LastPrice }) {
+  const change = priceChange(line, last)
+  const lastText = last.unitPrice > 0 ? `$${last.unitPrice.toFixed(2)}/ea` : `$${last.amount.toFixed(2)}`
+  return (
+    <p className="price-banner">
+      Last paid {lastText} on {last.date} at {last.merchant}
+      {change && (
+        <span className={change.pct > 0.05 ? 'price-up' : change.pct < -0.05 ? 'price-down' : 'price-same'}>
+          {change.pct > 0.05
+            ? ` ▲ ${change.pct.toFixed(1)}% more`
+            : change.pct < -0.05
+              ? ` ▼ ${Math.abs(change.pct).toFixed(1)}% less`
+              : ' • same price'}
+        </span>
+      )}
+    </p>
+  )
+}
+
 export default function ExpenseForm({
   categories,
   paymentMethods,
   members,
   vehicles,
   tagSuggestions,
+  merchantSuggestions,
+  itemSuggestions,
   onSaved,
 }: {
   categories: Category[]
@@ -93,6 +130,8 @@ export default function ExpenseForm({
   members: Member[]
   vehicles: Vehicle[]
   tagSuggestions: string[]
+  merchantSuggestions: string[]
+  itemSuggestions: string[]
   onSaved: (expense: Expense) => void
 }) {
   const activeCategories = categories.filter((c) => !c.archived)
@@ -120,6 +159,16 @@ export default function ExpenseForm({
       .then(setFuelPrice)
       .catch(() => {})
   }, [])
+  // Last-known price per line (keyed by line index), fetched when the item name is set.
+  const [lastPrices, setLastPrices] = useState<Record<number, LastPrice | null>>({})
+  const fetchLastPrice = async (index: number, name: string) => {
+    if (name.trim() === '') {
+      setLastPrices((p) => ({ ...p, [index]: null }))
+      return
+    }
+    const lp = await getItemLastPrice(name.trim()).catch(() => null)
+    setLastPrices((p) => ({ ...p, [index]: lp }))
+  }
 
   const canSubmit = activeMethods.length > 0 && activeCategories.length > 0
 
@@ -237,7 +286,12 @@ export default function ExpenseForm({
       <div className="row">
         <label>
           Merchant
-          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. Costco" />
+          <input
+            list="merchant-suggestions"
+            value={merchant}
+            onChange={(e) => setMerchant(e.target.value)}
+            placeholder="e.g. Costco"
+          />
         </label>
         <label>
           Date
@@ -294,8 +348,13 @@ export default function ExpenseForm({
             <label className="grow">
               Description
               <input
+                list="item-suggestions"
                 value={line.description}
-                onChange={(e) => updateLine(i, { description: e.target.value })}
+                onChange={(e) => {
+                  updateLine(i, { description: e.target.value })
+                  setLastPrices((p) => ({ ...p, [i]: null })) // clear stale banner until re-checked
+                }}
+                onBlur={(e) => void fetchLastPrice(i, e.target.value)}
                 placeholder="e.g. Kirkland Organic Eggs"
               />
             </label>
@@ -360,6 +419,7 @@ export default function ExpenseForm({
               <input list="value-tags" value={line.valueTag} onChange={(e) => updateLine(i, { valueTag: e.target.value })} placeholder="e.g. Splurge" />
             </label>
           </div>
+          {lastPrices[i] && <PriceBanner line={line} last={lastPrices[i]!} />}
           <label>
             Note (optional)
             <input value={line.notes} onChange={(e) => updateLine(i, { notes: e.target.value })} placeholder="e.g. needed for school project" />
@@ -375,6 +435,16 @@ export default function ExpenseForm({
       <datalist id="value-tags">
         {tagSuggestions.map((t) => (
           <option key={t} value={t} />
+        ))}
+      </datalist>
+      <datalist id="merchant-suggestions">
+        {merchantSuggestions.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
+      <datalist id="item-suggestions">
+        {itemSuggestions.map((n) => (
+          <option key={n} value={n} />
         ))}
       </datalist>
 

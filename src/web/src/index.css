@@ -332,6 +332,28 @@ fieldset.line {
 .line-unmatched {
   border-left: 3px solid var(--warn);
 }
+
+/* Previous-price banner (shown while entering a known item) */
+.price-banner {
+  margin: 0.1rem 0 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--accent-weak);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.price-banner .price-up {
+  color: var(--bad);
+  font-weight: 600;
+}
+.price-banner .price-down {
+  color: var(--good);
+  font-weight: 600;
+}
+.price-banner .price-same {
+  color: var(--muted);
+  font-weight: 600;
+}
 .matched-badge {
   color: var(--good);
   font-size: 0.8rem;

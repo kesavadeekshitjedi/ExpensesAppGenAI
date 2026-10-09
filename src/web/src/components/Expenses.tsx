@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   getCategories,
   getExpenses,
+  getItems,
   getPaymentMethods,
   getVehicles,
   type Category,
@@ -19,17 +20,19 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
+  const [itemNames, setItemNames] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [entryMode, setEntryMode] = useState<'manual' | 'receipt'>('manual')
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
-    Promise.all([getCategories(), getPaymentMethods(), getExpenses(), getVehicles()])
-      .then(([c, p, e, v]) => {
+    Promise.all([getCategories(), getPaymentMethods(), getExpenses(), getVehicles(), getItems()])
+      .then(([c, p, e, v, items]) => {
         setCategories(c)
         setPaymentMethods(p)
         setExpenses(e)
         setVehicles(v)
+        setItemNames(items.map((i) => i.fullName))
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -37,11 +40,11 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
 
   useEffect(load, [load])
 
-  // Offer previously used value tags as suggestions while typing (SPEC feature 4) — gathered from
-  // the expenses already loaded, so no extra endpoint is needed yet.
+  // Suggestions for autocomplete, gathered from data already loaded.
   const tagSuggestions = [
     ...new Set(expenses.flatMap((e) => e.lineItems.map((l) => l.valueTag).filter((t): t is string => !!t))),
   ].sort()
+  const merchantSuggestions = [...new Set(expenses.map((e) => e.merchant))].sort()
 
   const onSaved = (saved: Expense) => setExpenses((prev) => [saved, ...prev])
 
@@ -67,6 +70,8 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               members={members}
               vehicles={vehicles}
               tagSuggestions={tagSuggestions}
+              merchantSuggestions={merchantSuggestions}
+              itemSuggestions={itemNames}
               onSaved={onSaved}
             />
           ) : (
