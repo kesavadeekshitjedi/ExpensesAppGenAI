@@ -468,3 +468,15 @@ The firewall allows traffic from Azure services, because Container Apps on the c
 ### Solution Explorer only shows the API and tests. Where are the web app, Bicep, and workflows?
 
 Visual Studio's solution view only lists .NET projects. Click **Switch between solutions and available views** at the top of Solution Explorer (the folder icon with the VS logo) and choose **Folder View** to see every file. Or open the folder in VS Code.
+
+---
+
+## Vehicles, tax, and gas
+
+### Can the app figure out the tax rate for an item, or allocate tax so each item shows its true cost?
+
+Two separate things. The sales-tax **rate** is set by location (state + county + city), not per item; what differs per item is whether it is **taxable** (toggle per category in Settings → `Category.IsTaxable`). You usually do not need to look a rate up, because the real tax is already captured — receipt scans extract `TotalTax` and manual entry has a Tax field. From there the app **allocates** that tax across the expense's taxable lines (proportional, largest-remainder so it sums back exactly), and reports total `Amount + AllocatedTax`, so each category/vehicle/item reflects true, tax-inclusive cost. If you want a rate to estimate before buying, the expense form's **Estimate tax** button calls the free WA Dept. of Revenue API (`GET /tax-rate?zip=`) and fills Tax = combined rate × taxable subtotal (Washington only; nationwide services need a paid key, which we avoid).
+
+### How do I enter a gas fill-up, get gallons, and attribute it to a specific car?
+
+Add your cars in **Settings → Vehicles**. On an expense line, pick the **Vehicle**, then use the bidirectional line calculator: enter any two of Qty (gallons) / Unit price ($/gal) / Amount ($ total) and the third fills in — so total + $/gal gives gallons. Reports have a **By vehicle** breakdown for true per-car cost. The form also shows a reference **EIA** average gas price (`GET /fuel-price`, Washington `duoarea=SWA`) as a sanity check — it is not what you paid, just a hint. The EIA key lives in Key Vault secret `Eia-ApiKey`; the Container App reads it via a secret reference (`Eia__ApiKey`), so no key is in code.
