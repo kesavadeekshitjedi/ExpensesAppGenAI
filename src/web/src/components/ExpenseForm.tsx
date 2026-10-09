@@ -17,12 +17,23 @@ type LineDraft = {
   quantity: string
   unitPrice: string
   amount: string
+  // True once the user types an amount by hand; until then the amount auto-fills from qty × unit price.
+  amountEdited: boolean
   valueTag: string
   notes: string
 }
 
 function emptyLine(categoryId: string, forMemberId: string): LineDraft {
-  return { description: '', categoryId, forMemberId, quantity: '1', unitPrice: '', amount: '', valueTag: '', notes: '' }
+  return { description: '', categoryId, forMemberId, quantity: '1', unitPrice: '', amount: '', amountEdited: false, valueTag: '', notes: '' }
+}
+
+// The amount is Qty × Unit price whenever a unit price is present; with no unit price there is nothing
+// to compute, so the amount is left for the user to type directly.
+function computeAmount(line: LineDraft): string {
+  const unit = parseMoney(line.unitPrice)
+  if (unit === null) return ''
+  const qty = parseMoney(line.quantity) ?? 1
+  return (qty * unit).toFixed(2)
 }
 
 function today(): string {
@@ -67,6 +78,26 @@ export default function ExpenseForm({
   const updateLine = (index: number, patch: Partial<LineDraft>) =>
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)))
 
+  // Changing qty or unit price re-fills the amount unless the user has typed one by hand.
+  const updateQtyOrPrice = (index: number, patch: Partial<LineDraft>) =>
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== index) return l
+        const next = { ...l, ...patch }
+        return next.amountEdited ? next : { ...next, amount: computeAmount(next) }
+      }),
+    )
+
+  // Typing an amount pins it; clearing it resumes auto-fill from qty × unit price.
+  const updateAmount = (index: number, value: string) =>
+    setLines((prev) =>
+      prev.map((l, i) => {
+        if (i !== index) return l
+        if (value.trim() === '') return { ...l, amount: computeAmount(l), amountEdited: false }
+        return { ...l, amount: value, amountEdited: true }
+      }),
+    )
+
   const addLine = () => setLines((prev) => [...prev, emptyLine(firstCategoryId, defaultFor)])
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index))
 
@@ -102,6 +133,10 @@ export default function ExpenseForm({
     }
     if (lineItems.length === 0) {
       setError('Add at least one line item with a description.')
+      return
+    }
+    if (lineItems.some((l) => l.amount === null)) {
+      setError('Enter an amount for each item (or a unit price so it can be calculated).')
       return
     }
 
@@ -214,15 +249,23 @@ export default function ExpenseForm({
           <div className="row">
             <label>
               Qty
-              <input type="number" step="0.001" min="0" value={line.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} />
+              <input type="number" step="1" min="0" value={line.quantity} onChange={(e) => updateQtyOrPrice(i, { quantity: e.target.value })} />
             </label>
             <label>
               Unit price
-              <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} />
+              <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => updateQtyOrPrice(i, { unitPrice: e.target.value })} />
             </label>
             <label>
-              Amount (optional)
-              <input type="number" step="0.01" min="0" value={line.amount} onChange={(e) => updateLine(i, { amount: e.target.value })} placeholder="auto" />
+              Amount
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                value={line.amount}
+                onChange={(e) => updateAmount(i, e.target.value)}
+                placeholder="auto from qty × price"
+              />
             </label>
             <label>
               Value tag

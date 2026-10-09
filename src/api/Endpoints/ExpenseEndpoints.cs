@@ -97,16 +97,18 @@ public static class ExpenseEndpoints
                 errors["paymentMethodId"] = ["Choose a payment method."];
             }
 
-            // Validate the referenced categories and members all belong to this household.
-            var categoryIds = request.LineItems?.Select(l => l.CategoryId).Distinct().ToList() ?? [];
-            var validCategoryIds = await db.Categories
-                .Where(c => c.HouseholdId == householdId && categoryIds.Contains(c.Id))
-                .Select(c => c.Id).ToListAsync(ct);
-            var memberIds = request.LineItems?.Where(l => l.ForMemberId is not null)
-                .Select(l => l.ForMemberId!.Value).Distinct().ToList() ?? [];
-            var validMemberIds = await db.Members
-                .Where(m => m.HouseholdId == householdId && memberIds.Contains(m.Id))
-                .Select(m => m.Id).ToListAsync(ct);
+            // Load the household's reference names once up front. These are reused both to validate the
+            // request and to build the response, so the save path makes far fewer round-trips to the
+            // (Basic-tier, latency-sensitive) database than re-querying everything after SaveChanges.
+            var categoryNames = await db.Categories.AsNoTracking()
+                .Where(c => c.HouseholdId == householdId)
+                .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+            var memberNames = await db.Members.AsNoTracking()
+                .Where(m => m.HouseholdId == householdId)
+                .ToDictionaryAsync(m => m.Id, m => m.DisplayName, ct);
+            var valueTagNames = await db.ValueTags.AsNoTracking()
+                .Where(t => t.HouseholdId == householdId)
+                .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
 
             for (var i = 0; request.LineItems is not null && i < request.LineItems.Count; i++)
             {
@@ -115,11 +117,11 @@ public static class ExpenseEndpoints
                 {
                     errors[$"lineItems[{i}].description"] = ["Description is required."];
                 }
-                if (!validCategoryIds.Contains(line.CategoryId))
+                if (!categoryNames.ContainsKey(line.CategoryId))
                 {
                     errors[$"lineItems[{i}].categoryId"] = ["Choose a category for this line."];
                 }
-                if (line.ForMemberId is Guid forId && !validMemberIds.Contains(forId))
+                if (line.ForMemberId is Guid forId && !memberNames.ContainsKey(forId))
                 {
                     errors[$"lineItems[{i}].forMemberId"] = ["That member is not in your household."];
                 }
@@ -146,6 +148,11 @@ public static class ExpenseEndpoints
                 Source = isReceipt ? ExpenseSource.Receipt : ExpenseSource.Manual,
             };
 
+            // Remember each line's display bits (short form, value-tag name) as we resolve them, so the
+            // response is built from memory instead of a second set of queries.
+            var lineShortForms = new Dictionary<Guid, string?>();
+            var lineTagNames = new Dictionary<Guid, string?>();
+
             decimal total = 0;
             foreach (var line in request.LineItems!)
             {
@@ -157,22 +164,28 @@ public static class ExpenseEndpoints
                 // Manual entry: the description is the full name, so figure out a short form. Receipt:
                 // the description is the printed text; link it to the chosen/new item as-is.
                 Item item;
+                string? shortForm;
                 if (isReceipt)
                 {
                     item = await catalog.ResolveFromReceiptAsync(
                         householdId, merchant.Id, line.Description.Trim(), line.ItemId, line.FullName, line.CategoryId, ct);
+                    shortForm = line.Description.Trim();
                 }
                 else
                 {
                     var resolved = await catalog.ResolveAsync(
                         householdId, merchant.Id, line.Description.Trim(), line.CategoryId, line.ShortForm, ct);
                     item = resolved.Item;
+                    shortForm = resolved.ShortForm;
                 }
 
                 // A typed tag wins; otherwise fall back to the item's default value tag (SPEC feature 4).
                 var valueTag = await catalog.GetOrCreateValueTagAsync(householdId, user.GetMemberId(), line.ValueTag, ct);
+                var tagId = valueTag?.Id ?? item.DefaultValueTagId;
+                var tagName = valueTag?.Name
+                    ?? (item.DefaultValueTagId is Guid dt && valueTagNames.TryGetValue(dt, out var n) ? n : null);
 
-                expense.LineItems.Add(new LineItem
+                var lineItem = new LineItem
                 {
                     Id = Guid.NewGuid(),
                     ExpenseId = expense.Id,
@@ -183,9 +196,12 @@ public static class ExpenseEndpoints
                     Quantity = quantity,
                     UnitPrice = unitPrice,
                     Amount = amount,
-                    ValueTagId = valueTag?.Id ?? item.DefaultValueTagId,
+                    ValueTagId = tagId,
                     Notes = Trimmed(line.Notes),
-                });
+                };
+                expense.LineItems.Add(lineItem);
+                lineShortForms[lineItem.Id] = string.IsNullOrEmpty(shortForm) ? null : shortForm;
+                lineTagNames[lineItem.Id] = tagName;
             }
 
             expense.Total = total;
@@ -202,8 +218,33 @@ public static class ExpenseEndpoints
             }
             await db.SaveChangesAsync(ct);
 
-            var responses = await ToResponses(db, householdId, [expense], ct);
-            return Results.Created($"/expenses/{expense.Id}", responses[0]);
+            var response = new ExpenseResponse(
+                expense.Id,
+                merchant.Name,
+                paymentMethod.Id,
+                paymentMethod.Label,
+                expense.Date,
+                expense.Total,
+                expense.Tax,
+                expense.Notes,
+                expense.Source.ToString(),
+                memberNames.GetValueOrDefault(expense.EnteredByMemberId, "(unknown)"),
+                expense.LineItems.Select(l => new LineItemResponse(
+                    l.Id,
+                    l.Description,
+                    l.CategoryId,
+                    categoryNames.GetValueOrDefault(l.CategoryId, "(unknown)"),
+                    l.ForMemberId,
+                    l.ForMemberId is Guid fm ? memberNames.GetValueOrDefault(fm, "(unknown)") : "Family",
+                    l.Quantity,
+                    l.UnitPrice,
+                    l.Amount,
+                    lineTagNames.GetValueOrDefault(l.Id),
+                    l.Notes,
+                    l.ItemId,
+                    lineShortForms.GetValueOrDefault(l.Id)))
+                    .ToList());
+            return Results.Created($"/expenses/{expense.Id}", response);
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 
