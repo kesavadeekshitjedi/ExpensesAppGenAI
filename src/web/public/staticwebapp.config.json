@@ -1,6 +1,9 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "/*.{svg,png,ico,json}"]
-  }
+    "exclude": ["/assets/*", "/sw.js", "/manifest.json", "/*.{svg,png,ico,json,webmanifest}"]
+  },
+  "routes": [
+    { "route": "/sw.js", "headers": { "cache-control": "no-cache" } }
+  ]
 }

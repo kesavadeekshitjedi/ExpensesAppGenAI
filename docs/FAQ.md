@@ -480,3 +480,16 @@ Two separate things. The sales-tax **rate** is set by location (state + county +
 ### How do I enter a gas fill-up, get gallons, and attribute it to a specific car?
 
 Add your cars in **Settings → Vehicles**. On an expense line, pick the **Vehicle**, then use the bidirectional line calculator: enter any two of Qty (gallons) / Unit price ($/gal) / Amount ($ total) and the third fills in — so total + $/gal gives gallons. Reports have a **By vehicle** breakdown for true per-car cost. The form also shows a reference **EIA** average gas price (`GET /fuel-price`, Washington `duoarea=SWA`) as a sanity check — it is not what you paid, just a hint. The EIA key lives in Key Vault secret `Eia-ApiKey`; the Container App reads it via a secret reference (`Eia__ApiKey`), so no key is in code.
+
+---
+
+## Install the app on an iPhone (PWA)
+
+The web app is an installable PWA — no App Store or Mac needed yet. On the iPhone:
+
+1. Open **Safari** (must be Safari, not Chrome) and go to `https://ashy-desert-0e2b1851e.4.azurestaticapps.net`.
+2. Sign in once (only `kesavadeekshit@outlook.com` is allowed right now).
+3. Tap the **Share** button → **Add to Home Screen** → **Add**.
+4. Launch it from the new **Expenses** home-screen icon — it opens full-screen like a native app.
+
+From there: **Expenses → Scan a receipt** opens the camera, extracts the receipt, asks "what is this item?" for anything unmatched, shows the total-vs-lines difference, and saves. The **Reports** tab shows the graphs/breakdowns. A later phase wraps this same app with Capacitor for a real App Store / TestFlight build (needs the Apple Developer Program).
