@@ -19,7 +19,9 @@ Step 8 (manual expense entry) — **built and tested locally (2026-10-08); not y
 
 Step 9 (reports, basic) — **built and tested locally (2026-10-08).** `GET /reports/summary?from=&to=` (defaults to the current month) returns the period total plus breakdowns by category, who it was "for", payment method, merchant, item, and value tag; household-scoped and readable by children (SPEC feature 11). No schema change. Web **Reports** tab with a date range and breakdown tables.
 
-**Local verification (2026-10-08):** API + web both build and lint clean; 25 API tests pass (unit + end-to-end via `WebApplicationFactory`); all four EF migrations apply cleanly to LocalDB. **Pushed on 2026-10-08** so CI → Deploy would run (steps 7–9). **Not yet exercised in the browser against the real DB** — confirm after the deploy completes.
+**Local verification (2026-10-08):** API + web both build and lint clean; 25 API tests pass (unit + end-to-end via `WebApplicationFactory`); all four EF migrations apply cleanly to LocalDB. **Pushed on 2026-10-08** so CI → Deploy would run (steps 7–9).
+
+**Deploy confirmed (2026-10-09):** CI run `37877610429` and Deploy run `37877723193` both succeeded. The Deploy job generated the idempotent migration script, ran `create-api-user.sql` and `migrate.sql` against prod SQL cleanly (two `(1 row affected)`, no retries — so `AddPaymentMethodsAndCategories` and `AddExpenseEntry` applied), switched the Container App to image `936c42e…`, and the smoke test passed. Production `/health` returns `Healthy`. **Still not exercised in the browser against the real DB** — the in-browser check (sign in → add payment method → enter an expense → open Reports) is the one remaining confirmation for steps 7–9.
 
 ---
 
@@ -27,7 +29,7 @@ Step 9 (reports, basic) — **built and tested locally (2026-10-08).** `GET /rep
 
 **Pick up here next session.**
 
-1. **Confirm the steps 7–9 deploy and verify in the browser.** Steps 7–9 were pushed on 2026-10-08. Check CI → Deploy succeeded (`gh run list`), confirm the two migrations (`AddPaymentMethodsAndCategories`, `AddExpenseEntry`) applied to production, then sign in and: add a payment method, enter an expense, open the Reports tab (mirrors how step 6 was confirmed). If the deploy failed, see FAQ → GitHub for how to read the logs.
+1. **Browser-verify steps 7–9.** Deploy is confirmed (run `37877723193`; both migrations applied to prod — see "Deploy confirmed" above). Remaining: sign in and add a payment method, enter an expense, open the Reports tab (mirrors how step 6 was confirmed). This needs the user's interactive Microsoft sign-in.
 2. **Google sign-in (unfinished part of step 6).** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret for the GIS ID-token flow). Add a "Sign in with Google" button that POSTs the ID token to `/auth/session` with `provider: "Google"`. Provisioning/sessions/invitations/roles are already provider-agnostic — only validation + a button are new.
 3. **Finish the item database (step 10)** or move to **receipt capture (step 11)** — pick with the user. The lite item DB (full name → short form) already exists.
 4. Then the rest of the build order (budgets, recurring bills, price comparison, flags, predictions).
