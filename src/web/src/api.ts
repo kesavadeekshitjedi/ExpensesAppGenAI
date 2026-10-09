@@ -132,6 +132,56 @@ export const archiveCategory = (id: string, archived: boolean) =>
 export const archivePaymentMethod = (id: string, archived: boolean) =>
   apiFetch(`/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) })
 
+// ----- Item database (step 10) -----
+
+export type ReceiptDescription = {
+  merchant: string
+  printedDescription: string
+}
+
+export type Item = {
+  id: string
+  fullName: string
+  defaultCategoryId: string | null
+  defaultCategory: string | null
+  defaultValueTagId: string | null
+  defaultValueTag: string | null
+  hasPicture: boolean
+  receiptDescriptions: ReceiptDescription[]
+}
+
+export function getItems(search?: string): Promise<Item[]> {
+  const query = search && search.trim() !== '' ? `?search=${encodeURIComponent(search.trim())}` : ''
+  return getJson<Item[]>(`/items${query}`)
+}
+
+// Replaces the item's editable fields. A null category / blank tag clears that default.
+export function updateItem(
+  id: string,
+  fields: { fullName: string; defaultCategoryId: string | null; defaultValueTag: string | null },
+): Promise<Response> {
+  return apiFetch(`/items/${id}`, { method: 'PATCH', body: JSON.stringify(fields) })
+}
+
+export function mergeItems(targetId: string, sourceItemId: string): Promise<Response> {
+  return apiFetch(`/items/${targetId}/merge`, { method: 'POST', body: JSON.stringify({ sourceItemId }) })
+}
+
+// Picture upload is multipart/form-data, so it does not use apiFetch's JSON Content-Type.
+export function uploadItemPicture(id: string, file: File): Promise<Response> {
+  const body = new FormData()
+  body.append('file', file)
+  return fetch(`${apiBaseUrl}/items/${id}/picture`, { method: 'POST', credentials: 'include', body })
+}
+
+// Fetches the picture with credentials and returns an object URL (more reliable than <img src> when
+// third-party cookies are restricted). The caller must revoke the URL when done.
+export async function getItemPictureUrl(id: string): Promise<string | null> {
+  const res = await apiFetch(`/items/${id}/picture`)
+  if (!res.ok) return null
+  return URL.createObjectURL(await res.blob())
+}
+
 // ----- Reports (step 9) -----
 
 export type Bucket = {

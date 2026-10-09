@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, type Invitation, type Me, type Member } from '../api'
 import Expenses from './Expenses'
+import Items from './Items'
 import Reports from './Reports'
 import Settings from './Settings'
 
-type Tab = 'expenses' | 'reports' | 'settings' | 'household'
+type Tab = 'expenses' | 'items' | 'reports' | 'settings' | 'household'
 
 export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>('expenses')
@@ -32,6 +33,9 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
           <button aria-current={tab === 'expenses'} onClick={() => setTab('expenses')}>
             Expenses
           </button>
+          <button aria-current={tab === 'items'} onClick={() => setTab('items')}>
+            Items
+          </button>
           <button aria-current={tab === 'reports'} onClick={() => setTab('reports')}>
             Reports
           </button>
@@ -45,6 +49,7 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
       </header>
 
       {tab === 'expenses' && <Expenses me={me} members={members} />}
+      {tab === 'items' && <Items me={me} />}
       {tab === 'reports' && <Reports />}
       {tab === 'settings' && <Settings me={me} />}
       {tab === 'household' && <Household me={me} members={members} onMembersChanged={loadMembers} />}
