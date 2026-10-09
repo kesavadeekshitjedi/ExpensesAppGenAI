@@ -1,15 +1,38 @@
+import {
+  clearTokens,
+  doRefresh,
+  ensureFreshAccess,
+  getAccessToken,
+  getRefreshToken,
+  setTokens,
+  type TokenBundle,
+} from './auth/tokens'
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
 
-// All API calls include credentials so the session cookie set by /auth/session is sent back.
+// API calls authenticate with a bearer access token (not a cookie — iOS blocks cross-site cookies).
+// On a 401 we transparently refresh once and retry.
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  })
+  const run = () =>
+    fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeader(),
+        ...init?.headers,
+      },
+    })
+
+  let res = await run()
+  if (res.status === 401 && getRefreshToken()) {
+    if (await doRefresh()) res = await run()
+  }
+  return res
+}
+
+function authHeader(): Record<string, string> {
+  const token = getAccessToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 export type Me = {
@@ -18,6 +41,42 @@ export type Me = {
   role: 'Parent' | 'Child'
   displayName: string
   email: string | null
+}
+
+// Trade a Microsoft ID token for an app session (bearer tokens). Returns the member, or an error message.
+export async function signInWithToken(idToken: string, invitationCode: string | null): Promise<{ me?: Me; error?: string }> {
+  const res = await fetch(`${apiBaseUrl}/auth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: 'Microsoft', token: idToken, invitationCode }),
+  })
+  if (res.ok) {
+    const bundle = (await res.json()) as TokenBundle
+    setTokens(bundle)
+    return { me: bundle.me }
+  }
+  if (res.status === 403) {
+    const problem = (await res.json().catch(() => null)) as { title?: string } | null
+    return { error: problem?.title ?? 'You need an invitation to join a household.' }
+  }
+  return { error: 'Sign-in failed. Please try again.' }
+}
+
+// On app start: if we hold a refresh token, get a fresh session (and the member). Null = signed out.
+export async function restoreSession(): Promise<Me | null> {
+  return getRefreshToken() ? doRefresh() : null
+}
+
+export async function signOut(): Promise<void> {
+  const refreshToken = getRefreshToken()
+  if (refreshToken) {
+    await fetch(`${apiBaseUrl}/auth/mobile-logout`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    }).catch(() => {})
+  }
+  clearTokens()
 }
 
 export type Member = {
@@ -153,11 +212,21 @@ export type ScanResult = {
   lines: ScanLine[]
 }
 
+// Multipart POST with the bearer token (used for file uploads, which don't go through apiFetch).
+async function multipartPost(path: string, body: FormData): Promise<Response> {
+  const token = await ensureFreshAccess()
+  return fetch(`${apiBaseUrl}${path}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body,
+  })
+}
+
 // Uploads a receipt image (multipart) and returns the extracted, matched draft for review.
 export async function scanReceipt(file: File): Promise<ScanResult> {
   const body = new FormData()
   body.append('file', file)
-  const res = await fetch(`${apiBaseUrl}/receipts/scan`, { method: 'POST', credentials: 'include', body })
+  const res = await multipartPost('/receipts/scan', body)
   if (res.ok) return (await res.json()) as ScanResult
   const problem = (await res.json().catch(() => null)) as { title?: string; errors?: Record<string, string[]> } | null
   const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
@@ -237,7 +306,7 @@ export function mergeItems(targetId: string, sourceItemId: string): Promise<Resp
 export function uploadItemPicture(id: string, file: File): Promise<Response> {
   const body = new FormData()
   body.append('file', file)
-  return fetch(`${apiBaseUrl}/items/${id}/picture`, { method: 'POST', credentials: 'include', body })
+  return multipartPost(`/items/${id}/picture`, body)
 }
 
 // Fetches the picture with credentials and returns an object URL (more reliable than <img src> when

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AuthenticationResult } from '@azure/msal-browser'
-import { apiFetch, type Me } from './api'
+import { restoreSession, signInWithToken, signOut as apiSignOut, type Me } from './api'
 import { loginRequest, msal } from './auth/msal'
 import Dashboard from './components/Dashboard'
 
@@ -21,21 +21,15 @@ function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null
   const [checking, setChecking] = useState(initialRedirect?.idToken == null)
   const [error, setError] = useState<string | null>(null)
 
-  // Trade a Microsoft ID token for an app session cookie, applying any pending invitation code.
+  // Trade a Microsoft ID token for an app session (bearer tokens), applying any pending invitation code.
   const exchange = useCallback(async (idToken: string): Promise<void> => {
     const invite = sessionStorage.getItem('pending_invite')
-    const res = await apiFetch('/auth/session', {
-      method: 'POST',
-      body: JSON.stringify({ provider: 'Microsoft', token: idToken, invitationCode: invite }),
-    })
-    if (res.ok) {
+    const { me: signedIn, error: signInError } = await signInWithToken(idToken, invite)
+    if (signedIn) {
       sessionStorage.removeItem('pending_invite')
-      setMe((await res.json()) as Me)
-    } else if (res.status === 403) {
-      const problem = (await res.json().catch(() => null)) as { title?: string } | null
-      setError(problem?.title ?? 'You need an invitation to join a household.')
+      setMe(signedIn)
     } else {
-      setError('Sign-in failed. Please try again.')
+      setError(signInError ?? 'Sign-in failed. Please try again.')
     }
   }, [])
 
@@ -46,11 +40,9 @@ function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null
           // Just returned from Microsoft: complete sign-in.
           await exchange(initialRedirect.idToken)
         } else {
-          // Otherwise, see if a session cookie already identifies us.
-          const res = await apiFetch('/auth/me')
-          if (res.ok) {
-            setMe((await res.json()) as Me)
-          }
+          // Otherwise, resume a saved session from the stored refresh token.
+          const restored = await restoreSession()
+          if (restored) setMe(restored)
         }
       } catch {
         // Leave the signed-out view showing.
@@ -67,7 +59,7 @@ function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null
   }, [])
 
   const signOut = useCallback(async () => {
-    await apiFetch('/auth/logout', { method: 'POST' })
+    await apiSignOut()
     setMe(null)
   }, [])
 
