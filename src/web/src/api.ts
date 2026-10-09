@@ -295,6 +295,27 @@ export function getReportSummary(from?: string, to?: string): Promise<ReportSumm
   return getJson<ReportSummary>(`/reports/summary${query ? `?${query}` : ''}`)
 }
 
+export type TrendInterval = 'day' | 'week' | 'month'
+export type TrendPoint = { period: string; total: number; count: number }
+export type TrendResponse = { from: string; to: string; interval: string; points: TrendPoint[] }
+
+export function getTrend(from?: string, to?: string, interval: TrendInterval = 'month'): Promise<TrendResponse> {
+  const params = new URLSearchParams({ interval })
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return getJson<TrendResponse>(`/reports/trend?${params.toString()}`)
+}
+
+export type PricePoint = { date: string; unitPrice: number; amount: number; quantity: number; merchant: string }
+export type ItemPriceHistory = { itemId: string; fullName: string; points: PricePoint[] }
+
+export function getItemPriceHistory(itemId: string, from?: string, to?: string): Promise<ItemPriceHistory> {
+  const params = new URLSearchParams({ itemId })
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return getJson<ItemPriceHistory>(`/reports/item-price-history?${params.toString()}`)
+}
+
 // ----- Fuel price hint (EIA) -----
 
 export type FuelPrice = {

@@ -24,6 +24,14 @@ public static class ReportEndpoints
         List<Bucket> ByValueTag,
         List<Bucket> ByVehicle);
 
+    // A point on a spending-over-time chart.
+    public record TrendPoint(string Period, decimal Total, int Count);
+    public record TrendResponse(DateOnly From, DateOnly To, string Interval, List<TrendPoint> Points);
+
+    // A point on an item's price-over-time chart.
+    public record PricePoint(string Date, decimal UnitPrice, decimal Amount, decimal Quantity, string Merchant);
+    public record ItemPriceHistoryResponse(Guid ItemId, string FullName, List<PricePoint> Points);
+
     public static void MapReportEndpoints(this IEndpointRouteBuilder app)
     {
         // Reports are household-wide and readable by everyone, including view-only children (SPEC feature 11).
@@ -84,6 +92,111 @@ public static class ReportEndpoints
 
             return Results.Ok(summary);
         });
+
+        // Spending over time, bucketed by day / week / month, with empty periods filled so the chart is
+        // continuous. Defaults to the last 6 months by month.
+        group.MapGet("/trend", async (
+            DateOnly? from, DateOnly? to, string? interval,
+            ClaimsPrincipal user, ExpensesDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var today = DateOnly.FromDateTime(clock.GetUtcNow().LocalDateTime);
+            var unit = (interval ?? "month").ToLowerInvariant();
+            var end = to ?? today;
+            var start = from ?? unit switch
+            {
+                "day" => end.AddDays(-29),
+                "week" => end.AddDays(-7 * 11),
+                _ => end.AddMonths(-5),
+            };
+            if (end < start)
+            {
+                (start, end) = (end, start);
+            }
+
+            var householdId = user.GetHouseholdId();
+            var expenses = await db.Expenses.AsNoTracking()
+                .Where(e => e.HouseholdId == householdId && e.Date >= start && e.Date <= end)
+                .Include(e => e.LineItems)
+                .ToListAsync(ct);
+
+            var totals = new Dictionary<string, (decimal total, int count)>();
+            foreach (var e in expenses)
+            {
+                var key = BucketKey(e.Date, unit);
+                var sum = e.LineItems.Sum(l => l.Amount + l.AllocatedTax);
+                var prev = totals.GetValueOrDefault(key);
+                totals[key] = (prev.total + sum, prev.count + e.LineItems.Count);
+            }
+
+            var points = PeriodKeys(start, end, unit)
+                .Select(k =>
+                {
+                    var v = totals.GetValueOrDefault(k);
+                    return new TrendPoint(k, v.total, v.count);
+                })
+                .ToList();
+
+            return Results.Ok(new TrendResponse(start, end, unit, points));
+        });
+
+        // Price history for one item over time, for the per-item price-trend chart.
+        group.MapGet("/item-price-history", async (
+            Guid itemId, DateOnly? from, DateOnly? to,
+            ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
+        {
+            var householdId = user.GetHouseholdId();
+            var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId && i.HouseholdId == householdId, ct);
+            if (item is null)
+            {
+                return Results.NotFound();
+            }
+
+            var query = from l in db.LineItems.AsNoTracking()
+                        join e in db.Expenses.AsNoTracking() on l.ExpenseId equals e.Id
+                        where l.ItemId == itemId && e.HouseholdId == householdId
+                        select new { l.UnitPrice, l.Amount, l.Quantity, e.Date, e.MerchantId };
+            if (from is DateOnly f) query = query.Where(x => x.Date >= f);
+            if (to is DateOnly t) query = query.Where(x => x.Date <= t);
+
+            var rows = await query.OrderBy(x => x.Date).ToListAsync(ct);
+            var merchants = await NameMap(db.Merchants.Where(m => m.HouseholdId == householdId), m => m.Id, m => m.Name, ct);
+
+            var points = rows
+                .Select(r => new PricePoint(
+                    r.Date.ToString("yyyy-MM-dd"), r.UnitPrice, r.Amount, r.Quantity,
+                    merchants.GetValueOrDefault(r.MerchantId, "(unknown)")))
+                .ToList();
+
+            return Results.Ok(new ItemPriceHistoryResponse(item.Id, item.FullName, points));
+        });
+    }
+
+    private static DateOnly WeekStart(DateOnly d) => d.AddDays(-(((int)d.DayOfWeek + 6) % 7)); // Monday
+
+    private static string BucketKey(DateOnly d, string unit) => unit switch
+    {
+        "day" => d.ToString("yyyy-MM-dd"),
+        "week" => WeekStart(d).ToString("yyyy-MM-dd"),
+        _ => d.ToString("yyyy-MM"),
+    };
+
+    private static List<string> PeriodKeys(DateOnly start, DateOnly end, string unit)
+    {
+        var keys = new List<string>();
+        if (unit == "day")
+        {
+            for (var d = start; d <= end; d = d.AddDays(1)) keys.Add(d.ToString("yyyy-MM-dd"));
+        }
+        else if (unit == "week")
+        {
+            for (var d = WeekStart(start); d <= end; d = d.AddDays(7)) keys.Add(d.ToString("yyyy-MM-dd"));
+        }
+        else
+        {
+            for (var d = new DateOnly(start.Year, start.Month, 1); d <= new DateOnly(end.Year, end.Month, 1); d = d.AddMonths(1))
+                keys.Add(d.ToString("yyyy-MM"));
+        }
+        return keys;
     }
 
     private static List<Bucket> Group(
