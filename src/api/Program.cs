@@ -9,6 +9,7 @@ using Expenses.Api.Domain;
 using Expenses.Api.Endpoints;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
+using Expenses.Api.TaxRates;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -42,6 +43,13 @@ builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth")
 builder.Services.AddSingleton<IExternalIdentityValidator, MicrosoftIdentityValidator>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ItemCatalog>();
+
+// Washington DOR sales-tax rate lookup (free, no key). Typed HttpClient.
+builder.Services.AddHttpClient<ISalesTaxRateLookup, WaDorSalesTaxRateLookup>(c =>
+{
+    c.BaseAddress = new Uri("https://webgis.dor.wa.gov/");
+    c.Timeout = TimeSpan.FromSeconds(10);
+});
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -132,6 +140,7 @@ app.MapItemEndpoints();
 app.MapExpenseEndpoints();
 app.MapReceiptEndpoints();
 app.MapReportEndpoints();
+app.MapTaxRateEndpoints();
 
 app.Run();
 

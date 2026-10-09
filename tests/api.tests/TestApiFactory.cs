@@ -6,6 +6,7 @@ using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
+using Expenses.Api.TaxRates;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -28,6 +29,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
     public MemberRole Role { get; set; } = MemberRole.Parent;
     public FakeBlobStorage Blobs { get; } = new();
     public StubReceiptReader Receipts { get; } = new();
+    public StubTaxRateLookup TaxRates { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -38,9 +40,11 @@ public class TestApiFactory : WebApplicationFactory<Program>
         {
             services.AddDbContext<ExpensesDbContext>(options => options.UseInMemoryDatabase(_dbName));
 
-            // Replace blob storage and the receipt reader with in-memory/stub versions (no Azure).
+            // Replace blob storage, the receipt reader, and the tax-rate lookup with in-memory/stub
+            // versions (no Azure, no network). Registered after Program's versions so these win.
             services.AddSingleton<IBlobStorage>(Blobs);
             services.AddSingleton<IReceiptReader>(Receipts);
+            services.AddSingleton<ISalesTaxRateLookup>(TaxRates);
 
             // Sign every request in as this factory's member via a test scheme, and make it the default.
             services.AddSingleton(this);
@@ -121,6 +125,15 @@ public sealed class StubReceiptReader : IReceiptReader
         if (Throw) throw new InvalidOperationException("stub failure");
         return Task.FromResult(Result);
     }
+}
+
+// Returns a canned sales-tax rate so the lookup endpoint can be tested without calling WA DOR.
+public sealed class StubTaxRateLookup : ISalesTaxRateLookup
+{
+    public SalesTaxRate? Result { get; set; }
+
+    public Task<SalesTaxRate?> LookupAsync(string? address, string? city, string zip, CancellationToken ct = default) =>
+        Task.FromResult(Result);
 }
 
 public class TestAuthHandler(

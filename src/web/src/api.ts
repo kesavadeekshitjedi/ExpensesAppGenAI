@@ -279,6 +279,27 @@ export function getReportSummary(from?: string, to?: string): Promise<ReportSumm
   return getJson<ReportSummary>(`/reports/summary${query ? `?${query}` : ''}`)
 }
 
+// ----- Sales-tax rate lookup (Washington DOR) -----
+
+export type TaxRate = {
+  location: string
+  combinedRate: number
+  stateRate: number
+  localRate: number
+}
+
+// Looks up the WA combined rate for a ZIP (optionally a street/city for a better match). Returns null
+// when no Washington rate is found for the location.
+export async function getTaxRate(zip: string, addr?: string, city?: string): Promise<TaxRate | null> {
+  const params = new URLSearchParams({ zip })
+  if (addr) params.set('addr', addr)
+  if (city) params.set('city', city)
+  const res = await apiFetch(`/tax-rate?${params.toString()}`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error('Could not look up the tax rate.')
+  return (await res.json()) as TaxRate
+}
+
 // Returns the created expense, or throws with the API's validation message.
 export async function createExpense(expense: NewExpense): Promise<Expense> {
   const res = await apiFetch('/expenses', { method: 'POST', body: JSON.stringify(expense) })

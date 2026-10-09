@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import {
   createExpense,
+  getTaxRate,
   type Category,
   type Expense,
   type Member,
@@ -107,6 +108,9 @@ export default function ExpenseForm({
   const [lines, setLines] = useState<LineDraft[]>([emptyLine(firstCategoryId, '')])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // WA tax-rate estimate helper.
+  const [zip, setZip] = useState('')
+  const [rateNote, setRateNote] = useState<string | null>(null)
 
   const canSubmit = activeMethods.length > 0 && activeCategories.length > 0
 
@@ -119,6 +123,34 @@ export default function ExpenseForm({
 
   const addLine = () => setLines((prev) => [...prev, emptyLine(firstCategoryId, defaultFor)])
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index))
+
+  // Look up the WA combined rate for the ZIP and fill the Tax field = rate × taxable subtotal.
+  const estimateTax = async () => {
+    setRateNote(null)
+    if (zip.trim() === '') return
+    try {
+      const rate = await getTaxRate(zip.trim())
+      if (!rate) {
+        setRateNote('No Washington rate found for that ZIP.')
+        return
+      }
+      const taxableIds = new Set(categories.filter((c) => c.isTaxable).map((c) => c.id))
+      const taxableSubtotal = lines.reduce((sum, l) => {
+        if (!taxableIds.has(l.categoryId)) return sum
+        const amount = parseMoney(l.amount)
+        if (amount !== null) return sum + amount
+        const qty = parseMoney(l.quantity) ?? 1
+        const unit = parseMoney(l.unitPrice) ?? 0
+        return sum + qty * unit
+      }, 0)
+      setTax((taxableSubtotal * rate.combinedRate).toFixed(2))
+      setRateNote(
+        `${rate.location}: ${(rate.combinedRate * 100).toFixed(1)}% on taxable ${taxableSubtotal.toFixed(2)}`,
+      )
+    } catch {
+      setRateNote('Tax lookup failed.')
+    }
+  }
 
   const estimatedTotal = lines.reduce((sum, l) => {
     const amount = parseMoney(l.amount)
@@ -230,7 +262,15 @@ export default function ExpenseForm({
           Tax (optional)
           <input type="number" step="0.01" min="0" value={tax} onChange={(e) => setTax(e.target.value)} />
         </label>
+        <label>
+          ZIP (WA tax estimate)
+          <input value={zip} onChange={(e) => setZip(e.target.value)} placeholder="e.g. 98052" inputMode="numeric" />
+        </label>
+        <button type="button" onClick={estimateTax}>
+          Estimate tax
+        </button>
       </div>
+      {rateNote && <p className="hint">{rateNote}</p>}
 
       <h3>Items</h3>
       {lines.map((line, i) => (
