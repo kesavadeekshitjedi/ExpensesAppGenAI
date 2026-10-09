@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, type Invitation, type Me, type Member } from '../api'
+import Expenses from './Expenses'
+import Settings from './Settings'
+
+type Tab = 'expenses' | 'settings' | 'household'
 
 export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const [tab, setTab] = useState<Tab>('expenses')
   const [members, setMembers] = useState<Member[]>([])
-  const [invitations, setInvitations] = useState<Invitation[]>([])
-  const isParent = me.role === 'Parent'
 
+  // Members are loaded here because both the Household tab and the expense "for" picker need them.
   const loadMembers = useCallback(() => {
     apiFetch('/members')
       .then((r) => r.json() as Promise<Member[]>)
@@ -13,18 +17,7 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
       .catch(() => {})
   }, [])
 
-  const loadInvitations = useCallback(() => {
-    if (!isParent) return
-    apiFetch('/invitations')
-      .then((r) => r.json() as Promise<Invitation[]>)
-      .then(setInvitations)
-      .catch(() => {})
-  }, [isParent])
-
-  useEffect(() => {
-    loadMembers()
-    loadInvitations()
-  }, [loadMembers, loadInvitations])
+  useEffect(loadMembers, [loadMembers])
 
   return (
     <main>
@@ -34,8 +27,42 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
           Signed in as <strong>{me.displayName}</strong> ({me.role}){' '}
           <button onClick={onSignOut}>Sign out</button>
         </p>
+        <nav className="tabs">
+          <button aria-current={tab === 'expenses'} onClick={() => setTab('expenses')}>
+            Expenses
+          </button>
+          <button aria-current={tab === 'settings'} onClick={() => setTab('settings')}>
+            Settings
+          </button>
+          <button aria-current={tab === 'household'} onClick={() => setTab('household')}>
+            Household
+          </button>
+        </nav>
       </header>
 
+      {tab === 'expenses' && <Expenses me={me} members={members} />}
+      {tab === 'settings' && <Settings me={me} />}
+      {tab === 'household' && <Household me={me} members={members} onMembersChanged={loadMembers} />}
+    </main>
+  )
+}
+
+function Household({ me, members, onMembersChanged }: { me: Me; members: Member[]; onMembersChanged: () => void }) {
+  const [invitations, setInvitations] = useState<Invitation[]>([])
+  const isParent = me.role === 'Parent'
+
+  const loadInvitations = useCallback(() => {
+    if (!isParent) return
+    apiFetch('/invitations')
+      .then((r) => r.json() as Promise<Invitation[]>)
+      .then(setInvitations)
+      .catch(() => {})
+  }, [isParent])
+
+  useEffect(loadInvitations, [loadInvitations])
+
+  return (
+    <>
       <section>
         <h2>Members</h2>
         <ul>
@@ -46,7 +73,7 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
             </li>
           ))}
         </ul>
-        {isParent && <AddMember onAdded={loadMembers} />}
+        {isParent && <AddMember onAdded={onMembersChanged} />}
       </section>
 
       {isParent && (
@@ -69,7 +96,7 @@ export default function Dashboard({ me, onSignOut }: { me: Me; onSignOut: () => 
           </ul>
         </section>
       )}
-    </main>
+    </>
   )
 }
 

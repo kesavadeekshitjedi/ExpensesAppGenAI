@@ -20,3 +20,88 @@ main {
 [data-status='unreachable'] {
   color: #cf222e;
 }
+
+/* Tab navigation */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid #8884;
+  margin-bottom: 1rem;
+}
+.tabs button {
+  border: none;
+  background: none;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-bottom: 2px solid transparent;
+}
+.tabs button[aria-current='true'] {
+  border-bottom-color: currentColor;
+  font-weight: 600;
+}
+
+/* Expense form */
+.expense-form .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  margin-bottom: 0.5rem;
+}
+.expense-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  gap: 0.2rem;
+}
+.expense-form label.grow {
+  flex: 1 1 12rem;
+}
+.expense-form input,
+.expense-form select {
+  font: inherit;
+  padding: 0.3rem;
+}
+.expense-form .line {
+  border: 1px solid #8884;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.expense-form .total {
+  margin-left: auto;
+  font-weight: 600;
+}
+.hint {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+/* Expense list */
+.expense-list,
+.line-list {
+  list-style: none;
+  padding-left: 0;
+}
+.expense-list > li {
+  border: 1px solid #8884;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.6rem;
+}
+.line-list {
+  margin: 0.4rem 0 0;
+  padding-left: 1rem;
+  font-size: 0.9rem;
+}
+.short-form {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  opacity: 0.75;
+}
+.line-note {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  font-style: italic;
+}
