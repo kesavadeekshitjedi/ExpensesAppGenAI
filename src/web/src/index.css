@@ -105,3 +105,42 @@ main {
   opacity: 0.8;
   font-style: italic;
 }
+
+/* Reports */
+.report-total {
+  margin: 0.5rem 0 1rem;
+}
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+.breakdown {
+  border: 1px solid #8884;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+.breakdown h3 {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+.breakdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.breakdown td {
+  padding: 0.15rem 0;
+  vertical-align: top;
+}
+.breakdown td.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.breakdown td.share {
+  text-align: right;
+  opacity: 0.6;
+  width: 3rem;
+  font-variant-numeric: tabular-nums;
+}

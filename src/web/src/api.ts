@@ -132,6 +132,36 @@ export const archiveCategory = (id: string, archived: boolean) =>
 export const archivePaymentMethod = (id: string, archived: boolean) =>
   apiFetch(`/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) })
 
+// ----- Reports (step 9) -----
+
+export type Bucket = {
+  key: string
+  total: number
+  count: number
+}
+
+export type ReportSummary = {
+  from: string
+  to: string
+  total: number
+  lineItemCount: number
+  byCategory: Bucket[]
+  byFor: Bucket[]
+  byPaymentMethod: Bucket[]
+  byMerchant: Bucket[]
+  byItem: Bucket[]
+  byValueTag: Bucket[]
+}
+
+// Both dates are optional; the API defaults to the current calendar month.
+export function getReportSummary(from?: string, to?: string): Promise<ReportSummary> {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const query = params.toString()
+  return getJson<ReportSummary>(`/reports/summary${query ? `?${query}` : ''}`)
+}
+
 // Returns the created expense, or throws with the API's validation message.
 export async function createExpense(expense: NewExpense): Promise<Expense> {
   const res = await apiFetch('/expenses', { method: 'POST', body: JSON.stringify(expense) })
