@@ -17,6 +17,9 @@ build/
 **/uploads/
 **/local-images/
 
+# Compiled Bicep output (the source is main.bicep; the workflow compiles it)
+infra/main.json
+
 # OS / editor
 .vs/
 .vscode/
