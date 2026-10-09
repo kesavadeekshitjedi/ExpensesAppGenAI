@@ -143,6 +143,14 @@ module api 'modules/containerApp.bicep' = {
       { name: 'Email__SenderAddress', value: email.outputs.senderAddress }
       { name: 'KeyVault__Uri', value: keyVault.outputs.uri }
       { name: 'DataProtection__KeyVaultKeyId', value: keyVault.outputs.dataProtectionKeyId }
+      { name: 'Eia__ApiKey', secretRef: 'eia-api-key' }
+    ]
+    secrets: [
+      {
+        name: 'eia-api-key'
+        keyVaultUrl: '${keyVault.outputs.uri}secrets/Eia-ApiKey'
+        identity: apiIdentity.id
+      }
     ]
   }
 }

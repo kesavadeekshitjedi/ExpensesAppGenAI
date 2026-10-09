@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import {
   createExpense,
+  getFuelPrice,
   getTaxRate,
   type Category,
   type Expense,
+  type FuelPrice,
   type Member,
   type NewLineItem,
   type PaymentMethod,
@@ -111,6 +113,13 @@ export default function ExpenseForm({
   // WA tax-rate estimate helper.
   const [zip, setZip] = useState('')
   const [rateNote, setRateNote] = useState<string | null>(null)
+  // EIA fuel-price hint (only shown when the household tracks vehicles and the service is configured).
+  const [fuelPrice, setFuelPrice] = useState<FuelPrice | null>(null)
+  useEffect(() => {
+    getFuelPrice()
+      .then(setFuelPrice)
+      .catch(() => {})
+  }, [])
 
   const canSubmit = activeMethods.length > 0 && activeCategories.length > 0
 
@@ -273,6 +282,12 @@ export default function ExpenseForm({
       {rateNote && <p className="hint">{rateNote}</p>}
 
       <h3>Items</h3>
+      {fuelPrice && activeVehicles.length > 0 && (
+        <p className="hint">
+          ⛽ {fuelPrice.area} avg regular gas ~${fuelPrice.dollarsPerGallon.toFixed(2)}/gal (EIA, week of{' '}
+          {fuelPrice.period}) — a reference only; enter what you actually paid.
+        </p>
+      )}
       {lines.map((line, i) => (
         <fieldset key={i} className="line">
           <div className="row">

@@ -7,6 +7,7 @@ using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Expenses.Api.Endpoints;
+using Expenses.Api.FuelPrices;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Expenses.Api.TaxRates;
@@ -50,6 +51,24 @@ builder.Services.AddHttpClient<ISalesTaxRateLookup, WaDorSalesTaxRateLookup>(c =
     c.BaseAddress = new Uri("https://webgis.dor.wa.gov/");
     c.Timeout = TimeSpan.FromSeconds(10);
 });
+
+// EIA fuel-price hint: only when a key is configured (Key Vault in prod); otherwise a no-op provider
+// so local dev and tests boot without it.
+var eiaApiKey = builder.Configuration["Eia:ApiKey"];
+if (!string.IsNullOrEmpty(eiaApiKey))
+{
+    builder.Services.AddHttpClient("eia", c =>
+    {
+        c.BaseAddress = new Uri("https://api.eia.gov/");
+        c.Timeout = TimeSpan.FromSeconds(10);
+    });
+    builder.Services.AddSingleton<IFuelPriceProvider>(sp =>
+        new EiaFuelPriceProvider(sp.GetRequiredService<IHttpClientFactory>().CreateClient("eia"), eiaApiKey));
+}
+else
+{
+    builder.Services.AddSingleton<IFuelPriceProvider, NullFuelPriceProvider>();
+}
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -141,6 +160,7 @@ app.MapExpenseEndpoints();
 app.MapReceiptEndpoints();
 app.MapReportEndpoints();
 app.MapTaxRateEndpoints();
+app.MapFuelPriceEndpoints();
 
 app.Run();
 

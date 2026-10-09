@@ -279,6 +279,22 @@ export function getReportSummary(from?: string, to?: string): Promise<ReportSumm
   return getJson<ReportSummary>(`/reports/summary${query ? `?${query}` : ''}`)
 }
 
+// ----- Fuel price hint (EIA) -----
+
+export type FuelPrice = {
+  area: string
+  period: string
+  dollarsPerGallon: number
+}
+
+// Latest weekly average regular-gas price for an EIA area (default Washington). Null when unavailable
+// (no key configured, or the service returned nothing).
+export async function getFuelPrice(area?: string): Promise<FuelPrice | null> {
+  const res = await apiFetch(`/fuel-price${area ? `?area=${encodeURIComponent(area)}` : ''}`)
+  if (res.status === 204 || !res.ok) return null
+  return (await res.json()) as FuelPrice
+}
+
 // ----- Sales-tax rate lookup (Washington DOR) -----
 
 export type TaxRate = {

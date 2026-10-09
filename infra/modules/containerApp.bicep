@@ -10,6 +10,9 @@ param workspaceName string
 @description('Environment variables for the API container.')
 param env array
 
+@description('Container App secrets (e.g. Key Vault references). Env vars use secretRef to read them.')
+param secrets array = []
+
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: workspaceName
 }
@@ -61,6 +64,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: secrets
       ingress: {
         external: true
         targetPort: 8080

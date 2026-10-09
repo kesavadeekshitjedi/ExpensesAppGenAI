@@ -6,6 +6,7 @@ param name string
 param cryptoPrincipalId string
 
 var cryptoUserRoleId = '12338af0-0e69-4776-bea7-57ae8d297424' // Key Vault Crypto User
+var secretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6' // Key Vault Secrets User
 
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: name
@@ -46,6 +47,18 @@ resource cryptoUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalId: cryptoPrincipalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cryptoUserRoleId)
+  }
+}
+
+// Lets the API identity read secret values (e.g. the EIA fuel-price API key) via the Container App's
+// Key Vault secret reference.
+resource secretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(vault.id, cryptoPrincipalId, secretsUserRoleId)
+  scope: vault
+  properties: {
+    principalId: cryptoPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUserRoleId)
   }
 }
 
