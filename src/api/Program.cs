@@ -96,6 +96,7 @@ app.MapInvitationEndpoints();
 app.MapCategoryEndpoints();
 app.MapPaymentMethodEndpoints();
 app.MapExpenseEndpoints();
+app.MapReportEndpoints();
 
 app.Run();
 
