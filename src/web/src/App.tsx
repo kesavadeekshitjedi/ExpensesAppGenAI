@@ -13,7 +13,12 @@ if (urlInvite) {
 
 function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null }) {
   const [me, setMe] = useState<Me | null>(null)
-  const [loading, setLoading] = useState(true)
+  // Only block the whole screen while completing a returning Microsoft redirect (we must
+  // exchange the ID token before we can show the dashboard). On a normal visit we render the
+  // sign-in button immediately and check for an existing session in the background, so a
+  // cold-starting API never delays sign-in (signing in is client-side MSAL; it needs no API).
+  const [loading, setLoading] = useState(initialRedirect?.idToken != null)
+  const [checking, setChecking] = useState(initialRedirect?.idToken == null)
   const [error, setError] = useState<string | null>(null)
 
   // Trade a Microsoft ID token for an app session cookie, applying any pending invitation code.
@@ -51,6 +56,7 @@ function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null
         // Leave the signed-out view showing.
       } finally {
         setLoading(false)
+        setChecking(false)
       }
     })()
   }, [exchange, initialRedirect])
@@ -79,6 +85,7 @@ function App({ initialRedirect }: { initialRedirect: AuthenticationResult | null
         <h1>Home Expenses</h1>
         {urlInvite && <p>You’ve been invited to join a household. Sign in to accept.</p>}
         <button onClick={signIn}>Sign in with Microsoft</button>
+        {checking && <p className="hint">Checking for an existing session…</p>}
         {error && <p role="alert">{error}</p>}
       </main>
     )
