@@ -9,7 +9,7 @@ namespace Expenses.Api.Endpoints;
 public static class ExpenseEndpoints
 {
     public record CreateLineItemRequest(
-        string Description,
+        string Description,      // manual: the item's full name; receipt: the printed text
         Guid CategoryId,
         Guid? ForMemberId,       // null = Family
         decimal? Quantity,
@@ -17,7 +17,9 @@ public static class ExpenseEndpoints
         decimal? Amount,         // if null, computed from quantity x unit price
         string? ValueTag,
         string? Notes,
-        string? ShortForm);      // optional; the app figures one out when blank
+        string? ShortForm,       // manual only; the app figures one out when blank
+        Guid? ItemId = null,     // receipt: a chosen existing item for this printed line
+        string? FullName = null);// receipt: a new item's full name for this printed line
 
     public record CreateExpenseRequest(
         string Merchant,
@@ -25,7 +27,9 @@ public static class ExpenseEndpoints
         DateOnly? Date,
         decimal? Tax,
         string? Notes,
-        List<CreateLineItemRequest> LineItems);
+        List<CreateLineItemRequest> LineItems,
+        string? Source = null,            // "Receipt" for a reviewed receipt scan; otherwise manual
+        string? ReceiptBlobName = null);  // the stored receipt image (receipt source only)
 
     public record LineItemResponse(
         Guid Id, string Description, Guid CategoryId, string Category, Guid? ForMemberId, string For,
@@ -127,6 +131,7 @@ public static class ExpenseEndpoints
             }
 
             var merchant = await GetOrCreateMerchant(db, householdId, request.Merchant.Trim(), ct);
+            var isReceipt = string.Equals(request.Source, nameof(ExpenseSource.Receipt), StringComparison.OrdinalIgnoreCase);
 
             var expense = new Expense
             {
@@ -138,7 +143,7 @@ public static class ExpenseEndpoints
                 Date = request.Date ?? DateOnly.FromDateTime(clock.GetUtcNow().LocalDateTime),
                 Tax = request.Tax,
                 Notes = Trimmed(request.Notes),
-                Source = ExpenseSource.Manual,
+                Source = isReceipt ? ExpenseSource.Receipt : ExpenseSource.Manual,
             };
 
             decimal total = 0;
@@ -149,28 +154,52 @@ public static class ExpenseEndpoints
                 var amount = line.Amount ?? decimal.Round(quantity * unitPrice, 2);
                 total += amount;
 
-                var resolved = await catalog.ResolveAsync(
-                    householdId, merchant.Id, line.Description.Trim(), line.CategoryId, line.ShortForm, ct);
-                var valueTag = await GetOrCreateValueTag(db, householdId, user.GetMemberId(), line.ValueTag, ct);
+                // Manual entry: the description is the full name, so figure out a short form. Receipt:
+                // the description is the printed text; link it to the chosen/new item as-is.
+                Item item;
+                if (isReceipt)
+                {
+                    item = await catalog.ResolveFromReceiptAsync(
+                        householdId, merchant.Id, line.Description.Trim(), line.ItemId, line.FullName, line.CategoryId, ct);
+                }
+                else
+                {
+                    var resolved = await catalog.ResolveAsync(
+                        householdId, merchant.Id, line.Description.Trim(), line.CategoryId, line.ShortForm, ct);
+                    item = resolved.Item;
+                }
+
+                // A typed tag wins; otherwise fall back to the item's default value tag (SPEC feature 4).
+                var valueTag = await catalog.GetOrCreateValueTagAsync(householdId, user.GetMemberId(), line.ValueTag, ct);
 
                 expense.LineItems.Add(new LineItem
                 {
                     Id = Guid.NewGuid(),
                     ExpenseId = expense.Id,
                     Description = line.Description.Trim(),
-                    ItemId = resolved.Item.Id,
+                    ItemId = item.Id,
                     CategoryId = line.CategoryId,
                     ForMemberId = line.ForMemberId,
                     Quantity = quantity,
                     UnitPrice = unitPrice,
                     Amount = amount,
-                    ValueTagId = valueTag?.Id,
+                    ValueTagId = valueTag?.Id ?? item.DefaultValueTagId,
                     Notes = Trimmed(line.Notes),
                 });
             }
 
             expense.Total = total;
             db.Expenses.Add(expense);
+            if (isReceipt && !string.IsNullOrWhiteSpace(request.ReceiptBlobName))
+            {
+                db.Receipts.Add(new Receipt
+                {
+                    Id = Guid.NewGuid(),
+                    ExpenseId = expense.Id,
+                    ImageBlobName = request.ReceiptBlobName.Trim(),
+                    ExtractionStatus = ReceiptExtractionStatus.Extracted,
+                });
+            }
             await db.SaveChangesAsync(ct);
 
             var responses = await ToResponses(db, householdId, [expense], ct);
@@ -192,26 +221,6 @@ public static class ExpenseEndpoints
             db.Merchants.Add(merchant);
         }
         return merchant;
-    }
-
-    private static async Task<ValueTag?> GetOrCreateValueTag(ExpensesDbContext db, Guid householdId, Guid memberId, string? name, CancellationToken ct)
-    {
-        name = Trimmed(name);
-        if (name is null)
-        {
-            return null;
-        }
-
-        var existing = db.ValueTags.Local.FirstOrDefault(t => t.HouseholdId == householdId && string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
-            ?? await db.ValueTags.FirstOrDefaultAsync(t => t.HouseholdId == householdId && t.Name == name, ct);
-        if (existing is not null)
-        {
-            return existing;
-        }
-
-        var tag = new ValueTag { Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, CreatedByMemberId = memberId };
-        db.ValueTags.Add(tag);
-        return tag;
     }
 
     // Builds responses with the human-readable names the web app shows, looked up in bulk.

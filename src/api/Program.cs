@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Azure.AI.DocumentIntelligence;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
 using Azure.Storage.Blobs;
@@ -6,6 +7,7 @@ using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Expenses.Api.Endpoints;
+using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
@@ -79,6 +81,19 @@ else
     builder.Services.AddSingleton<IBlobStorage, NullBlobStorage>();
 }
 
+// Receipt reading via Azure AI Document Intelligence (prebuilt-receipt). Without an endpoint a
+// stand-in is registered so the app boots; scanning then fails with a clear message.
+var documentIntelligenceEndpoint = builder.Configuration["DocumentIntelligence:Endpoint"];
+if (!string.IsNullOrEmpty(documentIntelligenceEndpoint))
+{
+    builder.Services.AddSingleton(_ => new DocumentIntelligenceClient(new Uri(documentIntelligenceEndpoint), credential));
+    builder.Services.AddSingleton<IReceiptReader, DocumentIntelligenceReceiptReader>();
+}
+else
+{
+    builder.Services.AddSingleton<IReceiptReader, NullReceiptReader>();
+}
+
 // Session protection keys: in Azure, persist them to Blob Storage and encrypt them with a Key Vault
 // key, both reached through the managed identity. Locally (no Azure config) the default local key
 // ring is used so sign-in still works during development.
@@ -114,6 +129,7 @@ app.MapCategoryEndpoints();
 app.MapPaymentMethodEndpoints();
 app.MapItemEndpoints();
 app.MapExpenseEndpoints();
+app.MapReceiptEndpoints();
 app.MapReportEndpoints();
 
 app.Run();

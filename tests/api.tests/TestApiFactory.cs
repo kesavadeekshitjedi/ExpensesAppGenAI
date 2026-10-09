@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
+using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -26,6 +27,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
     public Guid ParentMemberId { get; } = Guid.NewGuid();
     public MemberRole Role { get; set; } = MemberRole.Parent;
     public FakeBlobStorage Blobs { get; } = new();
+    public StubReceiptReader Receipts { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -36,8 +38,9 @@ public class TestApiFactory : WebApplicationFactory<Program>
         {
             services.AddDbContext<ExpensesDbContext>(options => options.UseInMemoryDatabase(_dbName));
 
-            // Replace blob storage with an in-memory fake so picture upload/download work without Azure.
+            // Replace blob storage and the receipt reader with in-memory/stub versions (no Azure).
             services.AddSingleton<IBlobStorage>(Blobs);
+            services.AddSingleton<IReceiptReader>(Receipts);
 
             // Sign every request in as this factory's member via a test scheme, and make it the default.
             services.AddSingleton(this);
@@ -103,6 +106,20 @@ public sealed class FakeBlobStorage : IBlobStorage
     {
         _store.TryRemove(Key(container, blobName), out _);
         return Task.CompletedTask;
+    }
+}
+
+// Returns a canned extraction so receipt endpoints can be tested without a real Document Intelligence
+// call. A test sets Result (or Throw) before scanning.
+public sealed class StubReceiptReader : IReceiptReader
+{
+    public ExtractedReceipt Result { get; set; } = new(null, null, null, null, []);
+    public bool Throw { get; set; }
+
+    public Task<ExtractedReceipt> AnalyzeAsync(BinaryData image, CancellationToken ct = default)
+    {
+        if (Throw) throw new InvalidOperationException("stub failure");
+        return Task.FromResult(Result);
     }
 }
 
