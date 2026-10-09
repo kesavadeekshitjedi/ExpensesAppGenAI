@@ -1,8 +1,10 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
+using Expenses.Api.Storage;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -23,6 +25,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
     public Guid HouseholdId { get; } = Guid.NewGuid();
     public Guid ParentMemberId { get; } = Guid.NewGuid();
     public MemberRole Role { get; set; } = MemberRole.Parent;
+    public FakeBlobStorage Blobs { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -32,6 +35,9 @@ public class TestApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             services.AddDbContext<ExpensesDbContext>(options => options.UseInMemoryDatabase(_dbName));
+
+            // Replace blob storage with an in-memory fake so picture upload/download work without Azure.
+            services.AddSingleton<IBlobStorage>(Blobs);
 
             // Sign every request in as this factory's member via a test scheme, and make it the default.
             services.AddSingleton(this);
@@ -65,6 +71,38 @@ public class TestApiFactory : WebApplicationFactory<Program>
     {
         var scope = Services.CreateScope();
         return scope.ServiceProvider.GetRequiredService<ExpensesDbContext>();
+    }
+}
+
+// In-memory blob store for tests: keyed by "container/blobName".
+public sealed class FakeBlobStorage : IBlobStorage
+{
+    private readonly ConcurrentDictionary<string, (byte[] Bytes, string ContentType)> _store = new();
+
+    private static string Key(string container, string blobName) => $"{container}/{blobName}";
+
+    public int Count => _store.Count;
+
+    public async Task UploadAsync(string container, string blobName, Stream content, string contentType, CancellationToken ct = default)
+    {
+        using var ms = new MemoryStream();
+        await content.CopyToAsync(ms, ct);
+        _store[Key(container, blobName)] = (ms.ToArray(), contentType);
+    }
+
+    public Task<BlobDownload?> OpenReadAsync(string container, string blobName, CancellationToken ct = default)
+    {
+        if (_store.TryGetValue(Key(container, blobName), out var entry))
+        {
+            return Task.FromResult<BlobDownload?>(new BlobDownload(new MemoryStream(entry.Bytes), entry.ContentType));
+        }
+        return Task.FromResult<BlobDownload?>(null);
+    }
+
+    public Task DeleteAsync(string container, string blobName, CancellationToken ct = default)
+    {
+        _store.TryRemove(Key(container, blobName), out _);
+        return Task.CompletedTask;
     }
 }
 

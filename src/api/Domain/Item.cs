@@ -9,5 +9,13 @@ public class Item
     public Guid HouseholdId { get; set; }
     public required string FullName { get; set; }
     public Guid? DefaultCategoryId { get; set; }
+
+    // A default value tag applied automatically when this item is recognized on a receipt (SPEC
+    // feature 4), changeable per line. Null when the family hasn't tagged the item.
+    public Guid? DefaultValueTagId { get; set; }
+
+    // Name of the blob in the "item-pictures" container holding a photo of the actual item, or null.
+    public string? PictureBlobName { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }

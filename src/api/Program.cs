@@ -1,10 +1,12 @@
 using System.Text.Json.Serialization;
 using Azure.Identity;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
+using Azure.Storage.Blobs;
 using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Expenses.Api.Endpoints;
+using Expenses.Api.Storage;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
@@ -56,17 +58,32 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorizationBuilder()
     .AddPolicy(AppClaims.ParentPolicy, policy => policy.RequireClaim(AppClaims.Role, nameof(MemberRole.Parent)));
 
-// Session protection keys: in Azure, persist them to Blob Storage and encrypt them with a Key Vault
-// key, both reached through the managed identity (no secrets). Locally (no Azure config) the default
-// local key ring is used so sign-in still works during development.
+// The managed-identity credential used to reach every Azure service (no secrets). Created once and
+// shared; only needed when some Azure endpoint is configured (absent locally and in tests).
 var blobEndpoint = builder.Configuration["Storage:BlobEndpoint"];
 var keyVaultKeyId = builder.Configuration["DataProtection:KeyVaultKeyId"];
+var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+{
+    ManagedIdentityClientId = builder.Configuration["AZURE_CLIENT_ID"],
+});
+
+// Blob storage for item pictures and receipt images. Without an endpoint (local dev, tests) a
+// stand-in is registered so the app still boots; attempts to use it fail with a clear message.
+if (!string.IsNullOrEmpty(blobEndpoint))
+{
+    builder.Services.AddSingleton(_ => new BlobServiceClient(new Uri(blobEndpoint), credential));
+    builder.Services.AddSingleton<IBlobStorage, AzureBlobStorage>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlobStorage, NullBlobStorage>();
+}
+
+// Session protection keys: in Azure, persist them to Blob Storage and encrypt them with a Key Vault
+// key, both reached through the managed identity. Locally (no Azure config) the default local key
+// ring is used so sign-in still works during development.
 if (!string.IsNullOrEmpty(blobEndpoint) && !string.IsNullOrEmpty(keyVaultKeyId))
 {
-    var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
-    {
-        ManagedIdentityClientId = builder.Configuration["AZURE_CLIENT_ID"],
-    });
     builder.Services.AddDataProtection()
         .SetApplicationName("expenses")
         .PersistKeysToAzureBlobStorage(new Uri(new Uri(blobEndpoint), "dataprotection/keys.xml"), credential)
@@ -95,6 +112,7 @@ app.MapMemberEndpoints();
 app.MapInvitationEndpoints();
 app.MapCategoryEndpoints();
 app.MapPaymentMethodEndpoints();
+app.MapItemEndpoints();
 app.MapExpenseEndpoints();
 app.MapReportEndpoints();
 

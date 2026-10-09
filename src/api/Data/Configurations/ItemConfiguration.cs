@@ -9,6 +9,7 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
     public void Configure(EntityTypeBuilder<Item> builder)
     {
         builder.Property(i => i.FullName).HasMaxLength(200).IsRequired();
+        builder.Property(i => i.PictureBlobName).HasMaxLength(200);
         builder.Property(i => i.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
 
         builder.HasOne<Household>()
@@ -20,6 +21,12 @@ public class ItemConfiguration : IEntityTypeConfiguration<Item>
         builder.HasOne<Category>()
             .WithMany()
             .HasForeignKey(i => i.DefaultCategoryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Restrict: Household already cascades to items; the default value tag is just a reference.
+        builder.HasOne<ValueTag>()
+            .WithMany()
+            .HasForeignKey(i => i.DefaultValueTagId)
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(i => new { i.HouseholdId, i.FullName }).IsUnique();
