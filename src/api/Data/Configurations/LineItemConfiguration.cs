@@ -12,6 +12,7 @@ public class LineItemConfiguration : IEntityTypeConfiguration<LineItem>
         builder.Property(l => l.Quantity).HasPrecision(18, 3);
         builder.Property(l => l.UnitPrice).HasPrecision(18, 2);
         builder.Property(l => l.Amount).HasPrecision(18, 2);
+        builder.Property(l => l.AllocatedTax).HasPrecision(18, 2).HasDefaultValue(0m);
         builder.Property(l => l.Notes).HasMaxLength(2000);
 
         // The Expense -> LineItem relationship (with cascade delete) is configured on ExpenseConfiguration.

@@ -25,6 +25,10 @@ public class LineItem
     public decimal UnitPrice { get; set; }
     public decimal Amount { get; set; }
 
+    // This line's share of the expense's sales tax, spread across taxable lines when the expense was
+    // saved. The line's true cost is Amount + AllocatedTax.
+    public decimal AllocatedTax { get; set; }
+
     public Guid? ValueTagId { get; set; }
     public string? Notes { get; set; }
 }

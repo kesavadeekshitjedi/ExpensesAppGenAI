@@ -9,6 +9,7 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
     public void Configure(EntityTypeBuilder<Category> builder)
     {
         builder.Property(c => c.Name).HasMaxLength(100).IsRequired();
+        builder.Property(c => c.IsTaxable).HasDefaultValue(true);
         builder.Property(c => c.CreatedAt).HasDefaultValueSql("SYSUTCDATETIME()");
 
         builder.HasOne<Household>()

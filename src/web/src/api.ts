@@ -43,6 +43,7 @@ export type Category = {
   id: string
   name: string
   archived: boolean
+  isTaxable: boolean
 }
 
 export const paymentMethodTypes = ['CreditCard', 'BankAccount', 'Cash', 'Other'] as const
@@ -76,6 +77,7 @@ export type LineItem = {
   quantity: number
   unitPrice: number
   amount: number
+  allocatedTax: number
   valueTag: string | null
   notes: string | null
   itemId: string | null
@@ -173,8 +175,11 @@ export const getCategories = () => getJson<Category[]>('/categories')
 export const getPaymentMethods = () => getJson<PaymentMethod[]>('/payment-methods')
 export const getExpenses = () => getJson<Expense[]>('/expenses')
 
-export const createCategory = (name: string) =>
-  apiFetch('/categories', { method: 'POST', body: JSON.stringify({ name }) })
+export const createCategory = (name: string, isTaxable = true) =>
+  apiFetch('/categories', { method: 'POST', body: JSON.stringify({ name, isTaxable }) })
+
+export const setCategoryTaxable = (id: string, isTaxable: boolean) =>
+  apiFetch(`/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ isTaxable }) })
 
 export const createPaymentMethod = (label: string, type: PaymentMethodType) =>
   apiFetch('/payment-methods', { method: 'POST', body: JSON.stringify({ label, type }) })

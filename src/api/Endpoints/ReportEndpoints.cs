@@ -72,7 +72,7 @@ public static class ReportEndpoints
             var summary = new ReportSummary(
                 start,
                 end,
-                lines.Sum(x => x.line.Amount),
+                lines.Sum(x => x.line.Amount + x.line.AllocatedTax),
                 lines.Count,
                 Group(lines, x => Name(categories, x.line.CategoryId)),
                 Group(lines, x => x.line.ForMemberId is Guid fm ? Name(members, fm) : "Family"),
@@ -91,7 +91,7 @@ public static class ReportEndpoints
         Func<(LineItem line, Expense expense), string> key) =>
         lines
             .GroupBy(key)
-            .Select(g => new Bucket(g.Key, g.Sum(x => x.line.Amount), g.Count()))
+            .Select(g => new Bucket(g.Key, g.Sum(x => x.line.Amount + x.line.AllocatedTax), g.Count()))
             .OrderByDescending(b => b.Total)
             .ToList();
 

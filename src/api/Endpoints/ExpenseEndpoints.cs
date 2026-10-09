@@ -34,7 +34,7 @@ public static class ExpenseEndpoints
 
     public record LineItemResponse(
         Guid Id, string Description, Guid CategoryId, string Category, Guid? ForMemberId, string For,
-        decimal Quantity, decimal UnitPrice, decimal Amount, string? ValueTag, string? Notes,
+        decimal Quantity, decimal UnitPrice, decimal Amount, decimal AllocatedTax, string? ValueTag, string? Notes,
         Guid? ItemId, string? ShortForm, Guid? VehicleId, string? Vehicle);
 
     public record ExpenseResponse(
@@ -101,9 +101,12 @@ public static class ExpenseEndpoints
             // Load the household's reference names once up front. These are reused both to validate the
             // request and to build the response, so the save path makes far fewer round-trips to the
             // (Basic-tier, latency-sensitive) database than re-querying everything after SaveChanges.
-            var categoryNames = await db.Categories.AsNoTracking()
+            var categoryRows = await db.Categories.AsNoTracking()
                 .Where(c => c.HouseholdId == householdId)
-                .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+                .Select(c => new { c.Id, c.Name, c.IsTaxable })
+                .ToListAsync(ct);
+            var categoryNames = categoryRows.ToDictionary(c => c.Id, c => c.Name);
+            var taxableCategoryIds = categoryRows.Where(c => c.IsTaxable).Select(c => c.Id).ToHashSet();
             var memberNames = await db.Members.AsNoTracking()
                 .Where(m => m.HouseholdId == householdId)
                 .ToDictionaryAsync(m => m.Id, m => m.DisplayName, ct);
@@ -214,6 +217,14 @@ public static class ExpenseEndpoints
             }
 
             expense.Total = total;
+
+            // Spread the expense's sales tax across its taxable lines, so each item's true cost reflects
+            // its share of tax (SPEC feature 3). Falls back to all lines if none are in a taxable category.
+            if (expense.Tax is decimal taxAmount && taxAmount > 0)
+            {
+                AllocateTax(expense.LineItems, taxableCategoryIds, taxAmount);
+            }
+
             db.Expenses.Add(expense);
             if (isReceipt && !string.IsNullOrWhiteSpace(request.ReceiptBlobName))
             {
@@ -248,6 +259,7 @@ public static class ExpenseEndpoints
                     l.Quantity,
                     l.UnitPrice,
                     l.Amount,
+                    l.AllocatedTax,
                     lineTagNames.GetValueOrDefault(l.Id),
                     l.Notes,
                     l.ItemId,
@@ -313,6 +325,7 @@ public static class ExpenseEndpoints
                 l.Quantity,
                 l.UnitPrice,
                 l.Amount,
+                l.AllocatedTax,
                 l.ValueTagId is Guid vt ? Name(tags, vt) : null,
                 l.Notes,
                 l.ItemId,
@@ -323,6 +336,42 @@ public static class ExpenseEndpoints
                 l.VehicleId is Guid lv ? vehicles.GetValueOrDefault(lv) : null))
                 .ToList()))
             .ToList();
+    }
+
+    // Distributes an expense's tax across its taxable lines, proportional to each line's amount. Works in
+    // whole cents and hands the leftover cents to the largest fractional shares, so the allocated amounts
+    // always sum back to the tax exactly. Falls back to all lines when none are in a taxable category.
+    private static void AllocateTax(ICollection<LineItem> lines, HashSet<Guid> taxableCategoryIds, decimal tax)
+    {
+        var target = lines.Where(l => taxableCategoryIds.Contains(l.CategoryId)).ToList();
+        if (target.Count == 0 || target.Sum(l => l.Amount) == 0m)
+        {
+            target = lines.ToList();
+        }
+
+        var baseSum = target.Sum(l => l.Amount);
+        if (baseSum == 0m)
+        {
+            return; // nothing to weight the allocation by
+        }
+
+        var taxCents = (long)Math.Round(tax * 100m, MidpointRounding.AwayFromZero);
+        var shares = target
+            .Select(l =>
+            {
+                var exact = taxCents * l.Amount / baseSum;
+                var floor = (long)Math.Floor(exact);
+                return (line: l, cents: floor, frac: exact - floor);
+            })
+            .ToList();
+
+        var leftover = taxCents - shares.Sum(s => s.cents);
+        var ordered = shares.OrderByDescending(s => s.frac).ThenByDescending(s => s.line.Amount).ToList();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var extra = i < leftover ? 1L : 0L;
+            ordered[i].line.AllocatedTax = (ordered[i].cents + extra) / 100m;
+        }
     }
 
     private static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

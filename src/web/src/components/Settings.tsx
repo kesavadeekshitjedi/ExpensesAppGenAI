@@ -6,6 +6,7 @@ import {
   createCategory,
   createPaymentMethod,
   createVehicle,
+  setCategoryTaxable,
   getCategories,
   getPaymentMethods,
   getVehicles,
@@ -39,10 +40,14 @@ export default function Settings({ me }: { me: Me }) {
           {categories.map((c) => (
             <li key={c.id}>
               {c.name}
+              {!c.isTaxable && ' · non-taxable'}
               {c.archived && ' (archived)'}
               {isParent && (
                 <>
                   {' '}
+                  <button onClick={() => setCategoryTaxable(c.id, !c.isTaxable).then(load)}>
+                    {c.isTaxable ? 'Mark non-taxable' : 'Mark taxable'}
+                  </button>{' '}
                   <button onClick={() => archiveCategory(c.id, !c.archived).then(load)}>
                     {c.archived ? 'Restore' : 'Archive'}
                   </button>
@@ -151,13 +156,15 @@ function AddVehicle({ onAdded }: { onAdded: () => void }) {
 
 function AddCategory({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState('')
+  const [isTaxable, setIsTaxable] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const submit = async () => {
     if (name.trim() === '') return
-    const res = await createCategory(name.trim())
+    const res = await createCategory(name.trim(), isTaxable)
     if (res.ok) {
       setName('')
+      setIsTaxable(true)
       setError(null)
       onAdded()
     } else {
@@ -166,8 +173,11 @@ function AddCategory({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <div>
+    <div className="row">
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category" />
+      <label className="checkbox">
+        <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} /> Taxable
+      </label>
       <button onClick={submit}>Add</button>
       {error && <p role="alert">{error}</p>}
     </div>

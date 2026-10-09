@@ -99,6 +99,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
                   {e.lineItems.map((l) => (
                     <li key={l.id}>
                       {l.description} — {l.category} · for {l.for} · {l.amount.toFixed(2)}
+                      {l.allocatedTax > 0 && <span className="line-note"> (+tax {l.allocatedTax.toFixed(2)})</span>}
                       {l.vehicle && <> · 🚗 {l.vehicle}</>}
                       {l.valueTag && <> · {l.valueTag}</>}
                       {l.shortForm && <span className="short-form"> [{l.shortForm}]</span>}

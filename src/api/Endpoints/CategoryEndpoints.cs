@@ -8,9 +8,9 @@ namespace Expenses.Api.Endpoints;
 
 public static class CategoryEndpoints
 {
-    public record CategoryResponse(Guid Id, string Name, bool Archived);
-    public record CreateCategoryRequest(string Name);
-    public record UpdateCategoryRequest(string? Name, bool? Archived);
+    public record CategoryResponse(Guid Id, string Name, bool Archived, bool IsTaxable);
+    public record CreateCategoryRequest(string Name, bool? IsTaxable);
+    public record UpdateCategoryRequest(string? Name, bool? Archived, bool? IsTaxable);
 
     public static void MapCategoryEndpoints(this IEndpointRouteBuilder app)
     {
@@ -48,7 +48,7 @@ public static class CategoryEndpoints
                 return Results.Conflict(new { message = $"A category named \"{name}\" already exists." });
             }
 
-            var category = new Category { Id = Guid.NewGuid(), HouseholdId = householdId, Name = name };
+            var category = new Category { Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, IsTaxable = request.IsTaxable ?? true };
             db.Categories.Add(category);
             await db.SaveChangesAsync(ct);
             return Results.Created($"/categories/{category.Id}", ToResponse(category));
@@ -83,10 +83,15 @@ public static class CategoryEndpoints
                 category.Archived = archived;
             }
 
+            if (request.IsTaxable is bool isTaxable)
+            {
+                category.IsTaxable = isTaxable;
+            }
+
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToResponse(category));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 
-    private static CategoryResponse ToResponse(Category c) => new(c.Id, c.Name, c.Archived);
+    private static CategoryResponse ToResponse(Category c) => new(c.Id, c.Name, c.Archived, c.IsTaxable);
 }
