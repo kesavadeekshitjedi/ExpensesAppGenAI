@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   createExpense,
   getItems,
@@ -58,6 +58,8 @@ export default function ReceiptScan({
   const [scanning, setScanning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const libraryInputRef = useRef<HTMLInputElement>(null)
 
   // Item names and value tags for autocomplete, so the same item/tag is reused instead of re-created.
   useEffect(() => {
@@ -183,19 +185,39 @@ export default function ReceiptScan({
     )
   }
 
-  // Step 1: choose/take a photo.
+  // Step 1: take a new photo or choose an existing one.
   if (!draft) {
     return (
       <div>
-        <label>
-          Receipt photo
-          <input type="file" accept="image/*" capture="environment" onChange={(e) => onPickFile(e.target.files?.[0])} />
-        </label>
+        {/* Two inputs: one forces the camera (capture), one opens the photo library / files. */}
+        <input
+          ref={cameraInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          hidden
+          onChange={(e) => onPickFile(e.target.files?.[0])}
+        />
+        <input
+          ref={libraryInputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => onPickFile(e.target.files?.[0])}
+        />
+        <div className="row receipt-capture">
+          <button type="button" onClick={() => cameraInputRef.current?.click()}>
+            📷 Take a photo
+          </button>
+          <button type="button" onClick={() => libraryInputRef.current?.click()}>
+            🖼️ Choose a photo
+          </button>
+        </div>
         {scanning && <p>Reading the receipt…</p>}
         {error && <p role="alert">{error}</p>}
         <p className="hint">
-          On a phone this opens the camera. The app reads the printed text and matches each line to your item
-          database — nothing is saved until you review it below.
+          Take a photo of the receipt or pick one from your library. The app reads the printed text and matches
+          each line to your item database — nothing is saved until you review it below.
         </p>
       </div>
     )

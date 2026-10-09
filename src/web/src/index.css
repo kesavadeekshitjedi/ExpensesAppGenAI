@@ -321,6 +321,15 @@ fieldset.line {
   gap: 0.5rem;
   margin-bottom: 1rem;
 }
+.receipt-capture {
+  gap: 0.6rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.receipt-capture button {
+  flex: 1 1 10rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+}
 .entry-toggle button[aria-pressed='true'] {
   background: var(--accent);
   border-color: var(--accent);
