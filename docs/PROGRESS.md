@@ -17,7 +17,9 @@ Step 7 (payment methods & categories) — **built and tested locally (2026-10-08
 
 Step 8 (manual expense entry) — **built and tested locally (2026-10-08); not yet deployed.** `Expense` + `LineItem` with per-line category, "for" (a member or Family), value tag, and notes; `Merchant` and `ValueTag` created on demand. A **lite item database** (`Item` + `ItemReceiptDescription`, part of step 10) is populated as you enter: you type the full item name and the app **figures out the receipt "short form"** for you (deterministic `ShortForm` generator, no AI — SPEC #16). `POST /expenses` sums the line amounts into the total. Web Expenses tab has the entry form and a recent-expenses list that shows each line's short form.
 
-**Local verification (2026-10-08):** API + web both build; 23 API tests pass (unit + end-to-end via `WebApplicationFactory`); all four EF migrations apply cleanly to LocalDB. **Not yet pushed/deployed** (awaiting user review, per the push agreement), and **not yet exercised in the browser against the real DB.**
+Step 9 (reports, basic) — **built and tested locally (2026-10-08).** `GET /reports/summary?from=&to=` (defaults to the current month) returns the period total plus breakdowns by category, who it was "for", payment method, merchant, item, and value tag; household-scoped and readable by children (SPEC feature 11). No schema change. Web **Reports** tab with a date range and breakdown tables.
+
+**Local verification (2026-10-08):** API + web both build and lint clean; 25 API tests pass (unit + end-to-end via `WebApplicationFactory`); all four EF migrations apply cleanly to LocalDB. **Pushed on 2026-10-08** so CI → Deploy would run (steps 7–9). **Not yet exercised in the browser against the real DB** — confirm after the deploy completes.
 
 ---
 
@@ -25,10 +27,10 @@ Step 8 (manual expense entry) — **built and tested locally (2026-10-08); not y
 
 **Pick up here next session.**
 
-1. **Review and ship steps 7–8.** Read the four local commits (payment methods/categories backend, expense-entry backend, web UI, tests). When ready: `az login`, run the two new migrations against production either by deploying (the Deploy workflow applies `migrations script --idempotent` automatically) or via the FAQ's manual path, then **push** so CI → Deploy runs. After deploy, sign in and enter a test expense in the browser to verify end to end (mirrors how step 6 was confirmed).
+1. **Confirm the steps 7–9 deploy and verify in the browser.** Steps 7–9 were pushed on 2026-10-08. Check CI → Deploy succeeded (`gh run list`), confirm the two migrations (`AddPaymentMethodsAndCategories`, `AddExpenseEntry`) applied to production, then sign in and: add a payment method, enter an expense, open the Reports tab (mirrors how step 6 was confirmed). If the deploy failed, see FAQ → GitHub for how to read the logs.
 2. **Google sign-in (unfinished part of step 6).** Google Identity Services ID tokens. Add a `GoogleIdentityValidator : IExternalIdentityValidator` (issuer `https://accounts.google.com`, audience = a Google OAuth **Web** client ID, signature via Google's JWKS). Create a Google OAuth client ID (Google Cloud Console; no secret for the GIS ID-token flow). Add a "Sign in with Google" button that POSTs the ID token to `/auth/session` with `provider: "Google"`. Provisioning/sessions/invitations/roles are already provider-agnostic — only validation + a button are new.
-3. **Step 9: Reports (basic)** — the next feature phase. Spending by category / who-it-was-for / payment method / merchant / item / value tag over a period; budget vs. actual comes later.
-4. Then the rest of the build order (finish the item database, receipt capture, budgets, …).
+3. **Finish the item database (step 10)** or move to **receipt capture (step 11)** — pick with the user. The lite item DB (full name → short form) already exists.
+4. Then the rest of the build order (budgets, recurring bills, price comparison, flags, predictions).
 
 ### Loose ends to tidy (non-blocking)
 
@@ -51,7 +53,7 @@ From SPEC.md "Build Order for Phase 1".
 - [~] **6. Household members, sign-in with Microsoft and Google, invitations, Parent/Child roles** — *Microsoft sign-in built and **deployed** (2026-09-30); Google deferred; real browser sign-in test still pending.* API: token validation, Data Protection cookie sessions, first-sign-in bootstrap, Parent/Child authorization, members + invitations endpoints. Web: MSAL sign-in, dashboard (members, invitations with shareable links). Infra: Key Vault data-protection key + Crypto User + dataprotection blob container. Prod `/health` green; unauthenticated auth endpoints return 401.
 - [~] **7. Payment methods and categories** — *built + tested locally (2026-10-08); not deployed.* Entities, migration, Parent-only endpoints (`/payment-methods`, `/categories`), default category seed/backfill, web Settings tab.
 - [~] **8. Manual expense entry with line items, "for" tagging, value tags, and notes** — *built + tested locally (2026-10-08); not deployed.* `Expense`/`LineItem`/`Merchant`/`ValueTag`, `POST/GET /expenses`, web entry form + list. Expense edit/delete not yet built.
-- [ ] 9. Reports (basic)
+- [x] **9. Reports (basic)** — *built + tested locally (2026-10-08); pushed.* `GET /reports/summary`, web Reports tab. Budget-vs-actual deferred to step 12 (budgets).
 - [~] **10. Item database** — *lite version done as part of step 8:* `Item` + `ItemReceiptDescription` populated by manual entry, with the app figuring out the short form. Still to do: item merge, pictures, editing.
 - [ ] 11. Receipt capture, item matching, and "what is this item?" prompts
 - [ ] 12. Budgets and alerts (in-app, then email)
@@ -197,4 +199,6 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Built **step 8** (manual expense entry): `Expense`/`LineItem`/`Merchant`/`ValueTag` entities, `AddExpenseEntry` migration, `POST/GET /expenses` (Parent-only writes; the total is summed from the lines), web Expenses tab with an entry form and recent-expenses list. Dashboard reorganized into Expenses / Settings / Household tabs.
   - Built a **lite item database** (step 10 start): `Item` + `ItemReceiptDescription` and a deterministic `ShortForm` generator, so typing a full item name makes the app "figure out the short form" and stores it per merchant for future receipt matching. No AI (SPEC #16).
   - Added tests: `ShortForm`, `ItemCatalog`, default-category seeding, and **end-to-end expense API tests** through `WebApplicationFactory` (new `TestApiFactory` with an in-memory DB + stub parent auth in a "Testing" environment). 23 tests pass; all migrations apply cleanly to LocalDB.
-  - Recorded the design choices in SPEC Decisions #47–52 and added FAQ entries (Expense entry section). **Committed locally; not pushed** (awaiting review).
+  - Recorded the design choices in SPEC Decisions #47–52 and added FAQ entries (Expense entry section).
+  - Built **step 9** (basic reports): `GET /reports/summary` with period total and breakdowns by category / for / payment method / merchant / item / value tag (no schema change), web **Reports** tab with a date range. Added report API tests (25 tests total). SPEC #53; FAQ → Reports.
+  - **Pushed** (user asked to "do the reports and push"): steps 7–9 go out together, CI → Deploy applies the two migrations and ships API + web. Browser verification against production still pending.

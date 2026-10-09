@@ -369,6 +369,13 @@ All require a session cookie; writes require the `Parent` policy.
 | `POST /payment-methods`, `PATCH /payment-methods/{id}` | Parent | Add; rename, retype, archive |
 | `GET /expenses`, `GET /expenses/{id}` | any member | List (newest first, capped at 200) / read one, with readable names |
 | `POST /expenses` | Parent | Create an expense with line items; creates the merchant, items, and new value tags, and sums the total |
+| `GET /reports/summary?from=&to=` | any member | Period spending total + breakdowns (see Reports below) |
+
+### How do reports work? (the Reports tab)
+
+The **Reports** tab calls `GET /reports/summary`. With no dates it covers the **current calendar month**; otherwise pass `from` and `to` (inclusive, `YYYY-MM-DD`). It returns the **total** for the period and six breakdowns — **by category, by who it was "for"** (each member and Family), **by payment method, by merchant, by item, and by value tag** — each sorted by amount, with each row's share of the total shown as a percentage. Everyone in the household can view reports, including view-only children (SPEC feature 11).
+
+The endpoint loads the expenses in range and groups them in memory (`src/api/Endpoints/ReportEndpoints.cs`); phase-1 household volumes are small, so this stays simple and works the same on LocalDB and Azure SQL. There's **no new database table or migration** for reports. Not yet included (later steps): **budget vs. actual** (needs budgets, step 12), flag colors (step 15), and note search (part of a fuller reports pass).
 
 ### How do I run and test expense entry locally?
 
