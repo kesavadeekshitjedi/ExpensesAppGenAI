@@ -128,6 +128,66 @@ public class AuthServiceTests
     }
 
     [Fact]
+    public async Task TargetedInvitation_AttachesToExistingMember_WithoutDuplicating()
+    {
+        using var db = NewDb();
+        var service = new AuthService(db, TimeProvider.System);
+        var parent = (await service.SignInOrProvisionAsync(Identity("sub-1"), null)).Member!;
+
+        // An adult added for expense tagging, no sign-in yet.
+        var adult = new Member { Id = Guid.NewGuid(), HouseholdId = parent.HouseholdId, DisplayName = "Spouse", Role = MemberRole.Child };
+        db.Members.Add(adult);
+        db.Invitations.Add(new Invitation
+        {
+            Id = Guid.NewGuid(),
+            HouseholdId = parent.HouseholdId,
+            Role = MemberRole.Parent,
+            MemberId = adult.Id,
+            Code = "target-code",
+            Status = InvitationStatus.Pending,
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedByMemberId = parent.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await service.SignInOrProvisionAsync(Identity("sub-2", "Spouse", "spouse@example.com"), "target-code");
+
+        Assert.Equal(SignInOutcome.SignedIn, result.Outcome);
+        Assert.Equal(adult.Id, result.Member!.Id);           // same member, not a new one
+        Assert.Equal(MemberRole.Parent, result.Member.Role); // role from the invitation applied
+        Assert.Equal("sub-2", result.Member.ExternalId);
+        Assert.Equal(2, db.Members.Count());                 // parent + the attached adult only
+    }
+
+    [Fact]
+    public async Task TargetedInvitation_WhenMemberAlreadySignsIn_CreatesANewMember()
+    {
+        using var db = NewDb();
+        var service = new AuthService(db, TimeProvider.System);
+        var parent = (await service.SignInOrProvisionAsync(Identity("sub-1"), null)).Member!;
+
+        // The target already has a sign-in identity, so the invite can't re-claim it.
+        db.Invitations.Add(new Invitation
+        {
+            Id = Guid.NewGuid(),
+            HouseholdId = parent.HouseholdId,
+            Role = MemberRole.Child,
+            MemberId = parent.Id,
+            Code = "stale-code",
+            Status = InvitationStatus.Pending,
+            ExpiresAt = DateTimeOffset.UtcNow.AddDays(7),
+            CreatedByMemberId = parent.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var result = await service.SignInOrProvisionAsync(Identity("sub-2", "Other", "other@example.com"), "stale-code");
+
+        Assert.Equal(SignInOutcome.SignedIn, result.Outcome);
+        Assert.NotEqual(parent.Id, result.Member!.Id);
+        Assert.Equal(2, db.Members.Count());
+    }
+
+    [Fact]
     public async Task ExpiredInvitation_IsRejected()
     {
         using var db = NewDb();

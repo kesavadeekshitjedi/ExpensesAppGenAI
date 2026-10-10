@@ -12,6 +12,11 @@ public class Invitation
     // The role the invitee receives when they accept.
     public MemberRole Role { get; set; }
 
+    // Optional existing member this invitation is for. When set, accepting the invitation attaches the
+    // sign-in identity to that member (e.g. an adult added for expense tagging who is later invited to
+    // sign in) instead of creating a new member — so inviting an existing member never duplicates them.
+    public Guid? MemberId { get; set; }
+
     // The unguessable code embedded in the shareable invite link.
     public required string Code { get; set; }
 

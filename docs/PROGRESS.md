@@ -198,6 +198,20 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
   - Decided step 6 scope with the user: parents-only sign-in, Microsoft before Google, first-sign-in bootstraps the household, invitations as shareable links/codes (SPEC #43–46).
   - Built the step 6 data model (`Member`, `Invitation` + migration), committed locally.
   - Created the Microsoft Entra SPA app registration via az CLI (client ID `7c5331e4-…`, no secret); documented in FAQ → Sign-in and identity.
+- **2026-10-10**:
+  - **Bug (members):** adding a child did nothing visible. Root cause was missing feedback — the add
+    actually succeeded, but with no "Adding…"/error state (and `apiFetch` never throws on non-2xx) it
+    looked inert, so the user clicked twice and created a duplicate member. Fixed `AddMember` with a
+    busy/error state and disabled controls.
+  - Added **member removal**: `DELETE /members/{id}` (Parent-only) with guards — refuses a member who can
+    sign in, or one still referenced by expense line items (the `ForMemberId` FK is `Restrict`), returning
+    a clear 409 instead of a 500. Added a per-member **Remove** button (non-sign-in members only).
+  - **Members can be adults, not just children**, and an existing member can later be invited to sign in
+    without duplicating them. Add-member now has an Adult/Child selector; invitations gained an optional
+    `MemberId` target (migration `AddInvitationTargetMember`, nullable FK, Restrict); accepting a targeted
+    invite **attaches** the sign-in identity (and applies the invited role) to that member, falling back to
+    creating a new member if the target is missing or already claimed. Household UI adds an "Invite to
+    sign in" button per non-sign-in member that shows the invite link. 63 API tests pass; web lint/build clean.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

@@ -63,17 +63,38 @@ public class AuthService(ExpensesDbContext db, TimeProvider clock, IOptions<Auth
             return new SignInResult(SignInOutcome.InvalidInvitation, null);
         }
 
-        var member = new Member
+        // A targeted invitation attaches the sign-in to an existing member (an adult/child already added
+        // for expense tagging), as long as that member exists, is in the invitation's household, and has
+        // not already claimed a sign-in. Otherwise we fall back to creating a fresh member.
+        Member? member = null;
+        if (invitation.MemberId is Guid targetId)
         {
-            Id = Guid.NewGuid(),
-            HouseholdId = invitation.HouseholdId,
-            DisplayName = DisplayNameFor(identity),
-            Role = invitation.Role,
-            Email = identity.Email,
-            Provider = identity.Provider,
-            ExternalId = identity.Subject,
-        };
-        db.Members.Add(member);
+            var target = await db.Members.FirstOrDefaultAsync(
+                m => m.Id == targetId && m.HouseholdId == invitation.HouseholdId, ct);
+            if (target is not null && target.ExternalId is null)
+            {
+                target.Role = invitation.Role;
+                target.Email = identity.Email;
+                target.Provider = identity.Provider;
+                target.ExternalId = identity.Subject;
+                member = target;
+            }
+        }
+
+        if (member is null)
+        {
+            member = new Member
+            {
+                Id = Guid.NewGuid(),
+                HouseholdId = invitation.HouseholdId,
+                DisplayName = DisplayNameFor(identity),
+                Role = invitation.Role,
+                Email = identity.Email,
+                Provider = identity.Provider,
+                ExternalId = identity.Subject,
+            };
+            db.Members.Add(member);
+        }
 
         invitation.Status = InvitationStatus.Accepted;
         invitation.AcceptedAt = clock.GetUtcNow();

@@ -32,5 +32,11 @@ public class InvitationConfiguration : IEntityTypeConfiguration<Invitation>
             .WithMany()
             .HasForeignKey(i => i.AcceptedByMemberId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // The existing member a targeted invitation attaches to. Restrict (single cascade path rule).
+        builder.HasOne<Member>()
+            .WithMany()
+            .HasForeignKey(i => i.MemberId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

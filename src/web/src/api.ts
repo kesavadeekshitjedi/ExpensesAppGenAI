@@ -94,6 +94,7 @@ export type Invitation = {
   email: string | null
   status: string
   expiresAt: string
+  memberId: string | null
 }
 
 // ----- Categories and payment methods (step 7) -----

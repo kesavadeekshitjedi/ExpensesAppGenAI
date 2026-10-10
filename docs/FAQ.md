@@ -321,6 +321,20 @@ Children are **view-only**: the `Parent` authorization policy guards every write
 
 Copy `src/web/.env.example` to `src/web/.env.local` (both values are non-secret), create the local database (see the Database section), then run the API and web as usual. `http://localhost:5173` is already a redirect URI on the app registration, so Microsoft sign-in works locally. The API reads the client ID from `appsettings.json` (`Auth:Microsoft:ClientId`); locally, sessions use the default Data Protection key ring (Azure Blob/Key Vault are only wired when their config is present), so no Azure access is needed just to sign in.
 
+### How do I add a member, and can a member be an adult (not just a child)?
+
+In **Household**, "Add a member (name)" has an **Adult / Child** selector. Both are added as members who **cannot sign in** — they exist so expenses can be tagged "for" them. The role only matters once they sign in: **Adult = Parent** (full access), **Child = view-only**. `POST /members` takes `{ displayName, role }` (role is `"Parent"` or `"Child"`), Parent-only.
+
+The **Add** button shows "Adding…" while the request is in flight and surfaces an error if it fails — earlier it gave no feedback, so a successful add looked like nothing happened and it was easy to click twice and create a duplicate.
+
+### How do I invite an existing member to sign in (without creating a duplicate)?
+
+Each non-sign-in member has an **"Invite to sign in"** button. It creates a **targeted invitation** — `POST /invitations` with `{ role, memberId }` — and shows the shareable invite link (`https://<web>/?invite=<code>`). When that person accepts it, the API **attaches** their Microsoft identity to the existing member (and applies the invited role) instead of creating a new one, so the member they were tagged on keeps all their history. If the targeted member already signs in (or was removed), acceptance falls back to creating a fresh member. The target is stored in `Invitation.MemberId` (migration `AddInvitationTargetMember`, nullable FK, `Restrict`).
+
+### How do I remove a member (e.g. a duplicate)?
+
+Non-sign-in members have a **Remove** button → `DELETE /members/{id}` (Parent-only). It refuses (409) to delete a member who can sign in, or one still referenced by expense line items (the `LineItem.ForMemberId` FK is `Restrict`, so deleting them would otherwise fail) — reassign those lines first. A member with no tagged expenses deletes cleanly.
+
 ---
 
 ## Expense entry

@@ -9,8 +9,8 @@ namespace Expenses.Api.Endpoints;
 
 public static class InvitationEndpoints
 {
-    public record CreateInvitationRequest(MemberRole Role, string? Email, int? ExpiresInDays);
-    public record InvitationResponse(Guid Id, string Code, string Role, string? Email, string Status, DateTimeOffset ExpiresAt);
+    public record CreateInvitationRequest(MemberRole Role, string? Email, int? ExpiresInDays, Guid? MemberId);
+    public record InvitationResponse(Guid Id, string Code, string Role, string? Email, string Status, DateTimeOffset ExpiresAt, Guid? MemberId);
 
     public static void MapInvitationEndpoints(this IEndpointRouteBuilder app)
     {
@@ -19,13 +19,31 @@ public static class InvitationEndpoints
 
         group.MapPost("/", async (CreateInvitationRequest request, ClaimsPrincipal user, ExpensesDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
+            var householdId = user.GetHouseholdId();
+
+            // A targeted invitation must point at an existing member of this household who cannot yet sign
+            // in (so an adult added for tagging can later be invited without creating a duplicate member).
+            if (request.MemberId is Guid memberId)
+            {
+                var target = await db.Members.FirstOrDefaultAsync(m => m.Id == memberId && m.HouseholdId == householdId, ct);
+                if (target is null)
+                {
+                    return Results.NotFound();
+                }
+                if (target.ExternalId is not null)
+                {
+                    return Results.Conflict(new { message = "This member can already sign in." });
+                }
+            }
+
             var days = request.ExpiresInDays is > 0 and <= 90 ? request.ExpiresInDays.Value : 14;
             var invitation = new Invitation
             {
                 Id = Guid.NewGuid(),
-                HouseholdId = user.GetHouseholdId(),
+                HouseholdId = householdId,
                 Email = string.IsNullOrWhiteSpace(request.Email) ? null : request.Email.Trim(),
                 Role = request.Role,
+                MemberId = request.MemberId,
                 Code = GenerateCode(),
                 Status = InvitationStatus.Pending,
                 ExpiresAt = clock.GetUtcNow().AddDays(days),
@@ -73,5 +91,5 @@ public static class InvitationEndpoints
     }
 
     private static InvitationResponse ToResponse(Invitation i) =>
-        new(i.Id, i.Code, i.Role.ToString(), i.Email, i.Status.ToString(), i.ExpiresAt);
+        new(i.Id, i.Code, i.Role.ToString(), i.Email, i.Status.ToString(), i.ExpiresAt, i.MemberId);
 }
