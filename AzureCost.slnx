@@ -6,4 +6,7 @@
       <Platform Project="x86" />
     </Project>
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AzureCost.Core.Tests/AzureCost.Core.Tests.csproj" />
+  </Folder>
 </Solution>

@@ -41,6 +41,7 @@ public static class ServiceCollectionExtensions
             return (Azure.Core.TokenCredential)new DefaultAzureCredential(credOptions);
         });
 
+        services.AddTransient<ThrottleRetryHandler>();
         services.AddTransient<BearerTokenHandler>();
 
         services.AddHttpClient<ArmClient>((sp, client) =>
@@ -49,6 +50,9 @@ public static class ServiceCollectionExtensions
                 client.BaseAddress = new Uri(options.ArmBaseUri);
                 client.Timeout = TimeSpan.FromSeconds(100);
             })
+            // Order matters: the retry handler wraps the auth handler, so every retried
+            // attempt is re-stamped with a fresh bearer token before it goes out.
+            .AddHttpMessageHandler<ThrottleRetryHandler>()
             .AddHttpMessageHandler<BearerTokenHandler>();
 
         services.AddSingleton<IAzureCostService, AzureCostService>();

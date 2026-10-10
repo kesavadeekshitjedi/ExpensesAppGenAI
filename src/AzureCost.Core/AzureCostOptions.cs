@@ -36,4 +36,20 @@ public sealed class AzureCostOptions
 
     /// <summary>OAuth scope requested for ARM tokens.</summary>
     public string ArmScope { get; set; } = "https://management.azure.com/.default";
+
+    /// <summary>
+    /// How many times to retry a throttled (HTTP 429) or transient (502/503/504) ARM
+    /// response before surfacing the error. Cost Management throttles aggressively when the
+    /// UI fires bursts of queries (rapid subscription / period / resource-group changes), so
+    /// a few retries with backoff turn those 429s into a brief wait instead of a visible error.
+    /// Set to 0 to disable retrying.
+    /// </summary>
+    public int MaxRetries { get; set; } = 4;
+
+    /// <summary>
+    /// Base delay for exponential backoff when the server doesn't send a <c>Retry-After</c>
+    /// header. Attempt <c>n</c> waits roughly <c>RetryBaseDelay * 2^(n-1)</c> (plus jitter).
+    /// A server-supplied <c>Retry-After</c> always takes precedence over this.
+    /// </summary>
+    public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
 }

@@ -20,11 +20,18 @@ namespace AzureCost_WinUI.ViewModels;
 /// </summary>
 public partial class MainViewModel : ObservableObject
 {
+    /// <summary>How long to coalesce rapid selection changes before actually fetching, so
+    /// flicking through subscriptions/periods/resource groups fires one query, not a burst
+    /// (which Cost Management throttles with 429 — see docs/ISSUES.md #1).</summary>
+    private static readonly TimeSpan DebounceInterval = TimeSpan.FromMilliseconds(300);
+
     private readonly IAzureCostService _costService;
     private readonly DispatcherQueue? _dispatcher = DispatcherQueue.GetForCurrentThread();
     private bool _suppressReload;
     private int _costLoadToken;
     private int _resourceLoadToken;
+    private CancellationTokenSource? _costDebounceCts;
+    private CancellationTokenSource? _resourceDebounceCts;
 
     public MainViewModel(IAzureCostService costService)
     {
@@ -63,9 +70,11 @@ public partial class MainViewModel : ObservableObject
     private string _resourcesSubheader = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAnyLoading))]
     private bool _isBusy;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAnyLoading))]
     private bool _isLoadingResources;
 
     [ObservableProperty]
@@ -75,6 +84,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasNoResourceGroups))]
     private bool _hasLoadedOnce;
+
+    /// <summary>True while any fetch is in flight (subscription/period costs or resources),
+    /// so a single top-of-window progress bar can indicate all of them.</summary>
+    public bool IsAnyLoading => IsBusy || IsLoadingResources;
 
     public bool HasError => !string.IsNullOrEmpty(ErrorMessage);
 
@@ -133,7 +146,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (!_suppressReload && value is not null)
         {
-            _ = LoadCostsAsync();
+            _ = DebouncedLoadCostsAsync();
         }
     }
 
@@ -141,7 +154,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (!_suppressReload)
         {
-            _ = LoadCostsAsync();
+            _ = DebouncedLoadCostsAsync();
         }
     }
 
@@ -149,7 +162,51 @@ public partial class MainViewModel : ObservableObject
     {
         if (!_suppressReload)
         {
-            _ = LoadResourcesAsync(value);
+            _ = DebouncedLoadResourcesAsync(value);
+        }
+    }
+
+    /// <summary>Waits out a quiet <see cref="DebounceInterval"/> before loading costs; a newer
+    /// selection cancels this one, so a flurry of changes only fetches the final selection.</summary>
+    private async Task DebouncedLoadCostsAsync()
+    {
+        // Field writes happen on the UI thread (the only caller), so no locking is needed.
+        _costDebounceCts?.Cancel();
+        _costDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _costDebounceCts = cts;
+
+        if (await QuietAsync(cts.Token).ConfigureAwait(false))
+        {
+            await LoadCostsAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task DebouncedLoadResourcesAsync(ResourceGroupRow? group)
+    {
+        _resourceDebounceCts?.Cancel();
+        _resourceDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _resourceDebounceCts = cts;
+
+        if (await QuietAsync(cts.Token).ConfigureAwait(false))
+        {
+            await LoadResourcesAsync(group).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Returns true if the debounce window elapsed undisturbed, or false if a newer
+    /// change cancelled it (in which case the caller should not fetch).</summary>
+    private static async Task<bool> QuietAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(DebounceInterval, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
         }
     }
 
