@@ -72,6 +72,18 @@ main {
   margin: 0 auto;
   padding: 1.5rem 1.25rem 4rem;
 }
+/* Use more of the window on larger screens instead of a narrow centered column. */
+@media (min-width: 64rem) {
+  main {
+    max-width: 72rem;
+    padding-inline: 2rem;
+  }
+}
+@media (min-width: 100rem) {
+  main {
+    max-width: 82rem;
+  }
+}
 
 a {
   color: var(--accent);
@@ -221,6 +233,7 @@ main > header > p button {
 
 /* Sections become cards */
 main > section,
+.expenses-layout > section,
 .item-edit,
 fieldset.line,
 .expense-list > li,
@@ -231,12 +244,31 @@ fieldset.line,
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
 }
-main > section {
+main > section,
+.expenses-layout > section {
   padding: 1.25rem 1.35rem;
   margin-bottom: 1.25rem;
 }
-main > section h2:first-child {
+main > section h2:first-child,
+.expenses-layout > section h2:first-child {
   margin-top: 0;
+}
+
+/* Expenses tab: form and recent list side by side when there's room. */
+@media (min-width: 64rem) {
+  .expenses-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+  .expenses-layout > section {
+    margin-bottom: 0;
+  }
+  /* The "children can view but not enter" note (no form) spans the full width. */
+  .expenses-layout > p {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Forms */

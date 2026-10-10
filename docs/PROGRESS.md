@@ -212,6 +212,12 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     invite **attaches** the sign-in identity (and applies the invited role) to that member, falling back to
     creating a new member if the target is missing or already claimed. Household UI adds an "Invite to
     sign in" button per non-sign-in member that shows the invite link. 63 API tests pass; web lint/build clean.
+  - Deployed + verified (CI `38009330459` → Deploy `38009403153`; `AddInvitationTargetMember` applied; prod `/health` Healthy).
+  - **Enhancement (layout):** the app was pinned to a narrow 44rem centered column, leaving large empty
+    side margins on desktop. Widened `main` responsively (72rem ≥ 64rem wide, 82rem ≥ 100rem) and made the
+    **Expenses** tab lay the entry form and the recent-expenses list side by side on wide screens
+    (`.expenses-layout` grid); still a single column on phones/tablets, so the PWA is unaffected. CSS-only
+    plus a wrapper div; web lint/build clean.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

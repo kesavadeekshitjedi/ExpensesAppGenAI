@@ -51,7 +51,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   if (loading) return <p>Loading…</p>
 
   return (
-    <>
+    <div className="expenses-layout">
       {isParent ? (
         <section>
           <h2>Add an expense</h2>
@@ -118,6 +118,6 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
           </ul>
         )}
       </section>
-    </>
+    </div>
   )
 }
