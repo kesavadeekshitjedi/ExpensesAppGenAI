@@ -8,6 +8,7 @@ using Expenses.Api.Data;
 using Expenses.Api.Domain;
 using Expenses.Api.Endpoints;
 using Expenses.Api.FuelPrices;
+using Expenses.Api.Invoices;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Expenses.Api.TaxRates;
@@ -126,11 +127,16 @@ if (!string.IsNullOrEmpty(documentIntelligenceEndpoint))
 {
     builder.Services.AddSingleton(_ => new DocumentIntelligenceClient(new Uri(documentIntelligenceEndpoint), credential));
     builder.Services.AddSingleton<IReceiptReader, DocumentIntelligenceReceiptReader>();
+    builder.Services.AddSingleton<IInvoiceTextReader, DocumentIntelligenceInvoiceTextReader>();
 }
 else
 {
     builder.Services.AddSingleton<IReceiptReader, NullReceiptReader>();
+    builder.Services.AddSingleton<IInvoiceTextReader, NullInvoiceTextReader>();
 }
+
+// Vendor invoice parsers (Amazon first). The import endpoint tries each until one recognizes the text.
+builder.Services.AddSingleton<IInvoiceParser, AmazonInvoiceParser>();
 
 // Session protection keys: in Azure, persist them to Blob Storage and encrypt them with a Key Vault
 // key, both reached through the managed identity. Locally (no Azure config) the default local key
@@ -169,6 +175,7 @@ app.MapVehicleEndpoints();
 app.MapItemEndpoints();
 app.MapExpenseEndpoints();
 app.MapReceiptEndpoints();
+app.MapInvoiceEndpoints();
 app.MapReportEndpoints();
 app.MapTaxRateEndpoints();
 app.MapFuelPriceEndpoints();

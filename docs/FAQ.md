@@ -455,6 +455,28 @@ Document Intelligence and Blob Storage are Azure services, so locally (no `Docum
 
 ---
 
+## Invoice import (Amazon/Costco PDFs)
+
+### How do I import Amazon/Costco invoices, and how does it work?
+
+Save the order's invoice as a **PDF** (from Amazon, "Order Summary" → print/save as PDF), then in **Expenses → Import invoice** pick one or more PDFs. For each file the API: stores the PDF, extracts its text with Document Intelligence (`prebuilt-read`), parses it with a vendor parser (`AmazonInvoiceParser` reads the order number, order-placed date, Grand Total, Estimated tax, and the item lines), checks for duplicates, and returns a draft. You review each draft (payment method, per-line item name / category / "for", include/exclude) and **Save** — nothing is written until you approve. Saving goes through `POST /expenses` with `Source="Invoice"`, which records an `ImportedInvoice` row (order identity) and builds the item database from the lines, exactly like receipts.
+
+Why a deterministic text parser rather than the `prebuilt-invoice` model: the Amazon "Order Summary" format is highly consistent and text-based, so regex/positional parsing of the recognized text is more accurate for it (and free of the model's invoice-field guessing). `prebuilt-read` is used purely as the text extractor. Costco uses the same pipeline once a parser is added for its format.
+
+### How does it detect a duplicate invoice (same order uploaded twice)?
+
+Two keys, checked at import time (see `InvoiceEndpoints` / `ImportedInvoice`):
+- **Order number** (primary): the Amazon order id (e.g. `112-5242793-5269063`), which is stable even if you rename the file or re-download it — so two different-sized PDFs of the same order are still caught.
+- **Content hash** (secondary): SHA-256 of the file bytes, catching an identical re-upload.
+
+If either matches a prior import, the draft shows a warning banner with the earlier expense; you can **Skip** or import anyway. Separately, each line is checked against items already recorded **on the same purchase date** and flagged "possibly already recorded" — those lines default to **excluded** so a re-import doesn't double-count. (Real example from the samples: `inv4.pdf` and `invoice1.pdf` are the same order with different byte sizes — the order-number key catches it, the hash alone would not.)
+
+### Does invoice import cost anything, and where are the PDFs stored?
+
+No extra cost — it reuses the same **F0** Document Intelligence resource as receipts, and stores the PDFs in the existing `receipts` blob container (no new Azure resource, no infra change). `AmazonInvoiceParserTests` unit-test the parser against text mirroring the real samples, and `InvoiceApiTests` drive import → save → re-import with a stub reader to prove the dedup. Locally, with no `DocumentIntelligence:Endpoint`, import returns a clear "not configured" error (manual entry still works).
+
+---
+
 ## Security and secrets
 
 ### How do we avoid ever needing client secrets?

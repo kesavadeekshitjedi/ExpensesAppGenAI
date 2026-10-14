@@ -17,6 +17,7 @@ public class ExpensesDbContext(DbContextOptions<ExpensesDbContext> options) : Db
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<LineItem> LineItems => Set<LineItem>();
     public DbSet<Receipt> Receipts => Set<Receipt>();
+    public DbSet<ImportedInvoice> ImportedInvoices => Set<ImportedInvoice>();
     public DbSet<Vehicle> Vehicles => Set<Vehicle>();
     public DbSet<MobileRefreshToken> MobileRefreshTokens => Set<MobileRefreshToken>();
 

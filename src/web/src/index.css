@@ -374,6 +374,19 @@ fieldset.line {
   border-left: 3px solid var(--warn);
 }
 
+/* Invoice import: duplicate warnings */
+.dup-banner {
+  background: var(--accent-weak);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.85rem;
+}
+.line-duplicate {
+  border-left: 3px solid var(--warn);
+  opacity: 0.85;
+}
+
 /* Previous-price banner (shown while entering a known item) */
 .price-banner {
   margin: 0.1rem 0 0.4rem;

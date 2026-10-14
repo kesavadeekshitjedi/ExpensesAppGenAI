@@ -217,7 +217,19 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     side margins on desktop. Widened `main` responsively (72rem ≥ 64rem wide, 82rem ≥ 100rem) and made the
     **Expenses** tab lay the entry form and the recent-expenses list side by side on wide screens
     (`.expenses-layout` grid); still a single column on phones/tablets, so the PWA is unaffected. CSS-only
-    plus a wrapper div; web lint/build clean.
+    plus a wrapper div; web lint/build clean. Deployed (CI `38164290149` → Deploy `38164353601`).
+  - **Feature: invoice import (Amazon/Costco PDFs).** New **Expenses → Import invoice** (multi-file).
+    `POST /invoices/import` stores the PDF (in the existing `receipts` container — no infra change), reads
+    text via Document Intelligence `prebuilt-read`, and parses it with `AmazonInvoiceParser` (order number,
+    date, Grand Total, tax, line items). **Dedup** (user-requested): a new `ImportedInvoice` table
+    (migration `AddImportedInvoices`) keyed on **order number** (stable across re-downloads/renames) and
+    **content hash**; the draft warns on a duplicate order, and each line already recorded on the same date
+    is flagged and defaulted to excluded. Save reuses `POST /expenses` with `Source="Invoice"`. Decided to
+    parse text deterministically (PdfPig's only NuGet build is a sketchy `1.7.0-custom-5`, so avoided).
+    Samples validated it (inv4.pdf == invoice1.pdf, same order, different bytes → order-number dedup).
+    69 API tests pass (added `AmazonInvoiceParserTests`, `InvoiceApiTests`); web lint/build clean.
+    **Not yet pushed/deployed** — DI text quality on the real PDFs is "verify in prod" (same as receipts),
+    so expect a parser-tuning pass after the user imports their real files. HTML invoices not yet supported.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

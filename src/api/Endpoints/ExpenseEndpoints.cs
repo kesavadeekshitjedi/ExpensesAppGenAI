@@ -29,8 +29,11 @@ public static class ExpenseEndpoints
         decimal? Tax,
         string? Notes,
         List<CreateLineItemRequest> LineItems,
-        string? Source = null,            // "Receipt" for a reviewed receipt scan; otherwise manual
-        string? ReceiptBlobName = null);  // the stored receipt image (receipt source only)
+        string? Source = null,            // "Receipt" for a reviewed receipt scan, "Invoice" for an import; else manual
+        string? ReceiptBlobName = null,   // the stored receipt image (receipt source only)
+        string? InvoiceBlobName = null,   // the stored invoice PDF (invoice source only)
+        string? OrderNumber = null,       // the vendor order number parsed from the invoice (dedup key)
+        string? InvoiceContentHash = null); // SHA-256 of the invoice file (dedup key)
 
     public record LineItemResponse(
         Guid Id, string Description, Guid CategoryId, string Category, Guid? ForMemberId, string For,
@@ -145,6 +148,9 @@ public static class ExpenseEndpoints
 
             var merchant = await GetOrCreateMerchant(db, householdId, request.Merchant.Trim(), ct);
             var isReceipt = string.Equals(request.Source, nameof(ExpenseSource.Receipt), StringComparison.OrdinalIgnoreCase);
+            var isInvoice = string.Equals(request.Source, nameof(ExpenseSource.Invoice), StringComparison.OrdinalIgnoreCase);
+            // Receipt and invoice lines both carry a printed description linked to a chosen/new item.
+            var isImported = isReceipt || isInvoice;
 
             var expense = new Expense
             {
@@ -156,7 +162,7 @@ public static class ExpenseEndpoints
                 Date = request.Date ?? DateOnly.FromDateTime(clock.GetUtcNow().LocalDateTime),
                 Tax = request.Tax,
                 Notes = Trimmed(request.Notes),
-                Source = isReceipt ? ExpenseSource.Receipt : ExpenseSource.Manual,
+                Source = isReceipt ? ExpenseSource.Receipt : isInvoice ? ExpenseSource.Invoice : ExpenseSource.Manual,
             };
 
             // Remember each line's display bits (short form, value-tag name) as we resolve them, so the
@@ -176,7 +182,7 @@ public static class ExpenseEndpoints
                 // the description is the printed text; link it to the chosen/new item as-is.
                 Item item;
                 string? shortForm;
-                if (isReceipt)
+                if (isImported)
                 {
                     item = await catalog.ResolveFromReceiptAsync(
                         householdId, merchant.Id, line.Description.Trim(), line.ItemId, line.FullName, line.CategoryId, ct);
@@ -234,6 +240,23 @@ public static class ExpenseEndpoints
                     ExpenseId = expense.Id,
                     ImageBlobName = request.ReceiptBlobName.Trim(),
                     ExtractionStatus = ReceiptExtractionStatus.Extracted,
+                });
+            }
+            // Record the imported invoice's identity so the same order can't be imported again (by order
+            // number, stable across re-downloads, or by the file's content hash).
+            if (isInvoice && !string.IsNullOrWhiteSpace(request.InvoiceBlobName) && !string.IsNullOrWhiteSpace(request.InvoiceContentHash))
+            {
+                db.ImportedInvoices.Add(new ImportedInvoice
+                {
+                    Id = Guid.NewGuid(),
+                    HouseholdId = householdId,
+                    ExpenseId = expense.Id,
+                    Vendor = merchant.Name,
+                    OrderNumber = Trimmed(request.OrderNumber),
+                    ContentHash = request.InvoiceContentHash.Trim(),
+                    PurchaseDate = expense.Date,
+                    GrandTotal = expense.Total,
+                    BlobName = request.InvoiceBlobName.Trim(),
                 });
             }
             await db.SaveChangesAsync(ct);

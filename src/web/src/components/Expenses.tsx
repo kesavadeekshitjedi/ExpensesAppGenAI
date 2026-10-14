@@ -13,6 +13,7 @@ import {
   type Vehicle,
 } from '../api'
 import ExpenseForm from './ExpenseForm'
+import InvoiceImport from './InvoiceImport'
 import ReceiptScan from './ReceiptScan'
 
 export default function Expenses({ me, members }: { me: Me; members: Member[] }) {
@@ -22,7 +23,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [itemNames, setItemNames] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
-  const [entryMode, setEntryMode] = useState<'manual' | 'receipt'>('manual')
+  const [entryMode, setEntryMode] = useState<'manual' | 'receipt' | 'invoice'>('manual')
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
@@ -62,8 +63,11 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
             <button aria-pressed={entryMode === 'receipt'} onClick={() => setEntryMode('receipt')}>
               Scan a receipt
             </button>
+            <button aria-pressed={entryMode === 'invoice'} onClick={() => setEntryMode('invoice')}>
+              Import invoice
+            </button>
           </div>
-          {entryMode === 'manual' ? (
+          {entryMode === 'manual' && (
             <ExpenseForm
               categories={categories}
               paymentMethods={paymentMethods}
@@ -74,8 +78,17 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               itemSuggestions={itemNames}
               onSaved={onSaved}
             />
-          ) : (
+          )}
+          {entryMode === 'receipt' && (
             <ReceiptScan
+              categories={categories}
+              paymentMethods={paymentMethods}
+              members={members}
+              onSaved={onSaved}
+            />
+          )}
+          {entryMode === 'invoice' && (
+            <InvoiceImport
               categories={categories}
               paymentMethods={paymentMethods}
               members={members}

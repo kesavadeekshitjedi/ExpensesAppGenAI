@@ -4,6 +4,7 @@ using System.Text.Encodings.Web;
 using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Domain;
+using Expenses.Api.Invoices;
 using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Expenses.Api.TaxRates;
@@ -30,6 +31,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
     public MemberRole Role { get; set; } = MemberRole.Parent;
     public FakeBlobStorage Blobs { get; } = new();
     public StubReceiptReader Receipts { get; } = new();
+    public StubInvoiceTextReader Invoices { get; } = new();
     public StubTaxRateLookup TaxRates { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -45,6 +47,7 @@ public class TestApiFactory : WebApplicationFactory<Program>
             // versions (no Azure, no network). Registered after Program's versions so these win.
             services.AddSingleton<IBlobStorage>(Blobs);
             services.AddSingleton<IReceiptReader>(Receipts);
+            services.AddSingleton<IInvoiceTextReader>(Invoices);
             services.AddSingleton<ISalesTaxRateLookup>(TaxRates);
 
             // Sign every request in as this factory's member via a test scheme, and make it the default.
@@ -133,6 +136,20 @@ public sealed class StubReceiptReader : IReceiptReader
     {
         if (Throw) throw new InvalidOperationException("stub failure");
         return Task.FromResult(Result);
+    }
+}
+
+// Returns canned invoice text so the import endpoint can be tested without a real Document Intelligence
+// call. A test sets Text (or Throw) before importing.
+public sealed class StubInvoiceTextReader : IInvoiceTextReader
+{
+    public string Text { get; set; } = "";
+    public bool Throw { get; set; }
+
+    public Task<string> ReadTextAsync(BinaryData document, CancellationToken ct = default)
+    {
+        if (Throw) throw new InvalidOperationException("stub failure");
+        return Task.FromResult(Text);
     }
 }
 

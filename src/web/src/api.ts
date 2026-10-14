@@ -186,6 +186,9 @@ export type NewExpense = {
   lineItems: NewLineItem[]
   source?: string
   receiptBlobName?: string
+  invoiceBlobName?: string
+  orderNumber?: string | null
+  invoiceContentHash?: string
 }
 
 // ----- Receipt capture (step 11) -----
@@ -211,6 +214,58 @@ export type ScanResult = {
   lineSum: number
   difference: number
   lines: ScanLine[]
+}
+
+// ----- Invoice import (Amazon/Costco order PDFs) -----
+
+export type ImportLine = {
+  printedDescription: string
+  quantity: number
+  unitPrice: number
+  amount: number
+  matched: boolean
+  itemId: string | null
+  itemFullName: string | null
+  suggestedCategoryId: string | null
+  suggestedValueTag: string | null
+  possiblyDuplicate: boolean
+  duplicateExpenseId: string | null
+}
+
+export type InvoiceDuplicate = {
+  expenseId: string
+  importedAt: string
+  vendor: string
+  orderNumber: string | null
+  grandTotal: number
+  date: string
+  reason: string
+}
+
+export type ImportResult = {
+  invoiceBlobName: string
+  contentHash: string
+  vendor: string
+  orderNumber: string | null
+  date: string | null
+  subtotal: number | null
+  tax: number | null
+  grandTotal: number | null
+  lineSum: number
+  difference: number
+  duplicate: InvoiceDuplicate | null
+  lines: ImportLine[]
+}
+
+// Uploads an invoice PDF (multipart) and returns the parsed, dedup-checked draft for review.
+export async function importInvoice(file: File): Promise<ImportResult> {
+  const body = new FormData()
+  body.append('file', file)
+  const res = await multipartPost('/invoices/import', body)
+  if (res.ok) return (await res.json()) as ImportResult
+  const problem = (await res.json().catch(() => null)) as { title?: string; errors?: Record<string, string[]> } | null
+  const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
+  throw new Error(firstError ?? problem?.title ?? 'Could not read that invoice.')
 }
 
 // Multipart POST with the bearer token (used for file uploads, which don't go through apiFetch).

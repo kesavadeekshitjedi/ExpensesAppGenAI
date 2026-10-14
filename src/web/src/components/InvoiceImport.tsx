@@ -1,0 +1,337 @@
+import { useRef, useState } from 'react'
+import {
+  createExpense,
+  importInvoice,
+  type Category,
+  type Expense,
+  type ImportResult,
+  type Member,
+  type NewLineItem,
+  type PaymentMethod,
+} from '../api'
+
+// One invoice draft waiting to be reviewed (the parsed result plus the file it came from).
+type Draft = { fileName: string; result: ImportResult }
+
+// A line being reviewed. Money/quantity are strings while editing. `include` lets the user drop a line
+// that was flagged as already recorded (same item + same date).
+type ReviewLine = {
+  printedDescription: string
+  itemName: string
+  categoryId: string
+  forMemberId: string
+  quantity: string
+  unitPrice: string
+  amount: string
+  include: boolean
+  possiblyDuplicate: boolean
+}
+
+function parseMoney(value: string): number | null {
+  const n = Number.parseFloat(value)
+  return Number.isFinite(n) ? n : null
+}
+
+export default function InvoiceImport({
+  categories,
+  paymentMethods,
+  members,
+  onSaved,
+}: {
+  categories: Category[]
+  paymentMethods: PaymentMethod[]
+  members: Member[]
+  onSaved: (expense: Expense) => void
+}) {
+  const activeCategories = categories.filter((c) => !c.archived)
+  const activeMethods = paymentMethods.filter((p) => !p.archived)
+  const firstCategoryId = activeCategories[0]?.id ?? ''
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [drafts, setDrafts] = useState<Draft[]>([])
+  const [index, setIndex] = useState(0)
+  const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
+  const [lines, setLines] = useState<ReviewLine[]>([])
+  const [working, setWorking] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const current = drafts[index] ?? null
+
+  const toReviewLines = (result: ImportResult): ReviewLine[] =>
+    result.lines.map((l) => ({
+      printedDescription: l.printedDescription,
+      itemName: l.itemFullName ?? l.printedDescription,
+      categoryId: activeCategories.some((c) => c.id === l.suggestedCategoryId) ? l.suggestedCategoryId! : firstCategoryId,
+      forMemberId: '',
+      quantity: String(l.quantity),
+      unitPrice: String(l.unitPrice),
+      amount: String(l.amount),
+      // Flagged duplicates default to excluded so the same purchase is not recorded twice.
+      include: !l.possiblyDuplicate,
+      possiblyDuplicate: l.possiblyDuplicate,
+    }))
+
+  const showDraft = (list: Draft[], i: number) => {
+    setIndex(i)
+    setLines(i < list.length ? toReviewLines(list[i].result) : [])
+    setError(null)
+  }
+
+  const onPickFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setError(null)
+    setWorking(true)
+    const collected: Draft[] = []
+    try {
+      const chosen = Array.from(files)
+      for (let i = 0; i < chosen.length; i++) {
+        setProgress(`Reading ${i + 1} of ${chosen.length}…`)
+        try {
+          const result = await importInvoice(chosen[i])
+          collected.push({ fileName: chosen[i].name, result })
+        } catch (err) {
+          collected.push({
+            fileName: chosen[i].name,
+            // A failed read becomes an empty draft the user can fill in or skip.
+            result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, lines: [] },
+          })
+          if (err instanceof Error) setError(`${chosen[i].name}: ${err.message}`)
+        }
+      }
+      setDrafts(collected)
+      showDraft(collected, 0)
+    } finally {
+      setWorking(false)
+      setProgress('')
+    }
+  }
+
+  const updateLine = (i: number, patch: Partial<ReviewLine>) =>
+    setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)))
+  const removeLine = (i: number) => setLines((prev) => prev.filter((_, idx) => idx !== i))
+  const addLine = () =>
+    setLines((prev) => [
+      ...prev,
+      { printedDescription: '', itemName: '', categoryId: firstCategoryId, forMemberId: '', quantity: '1', unitPrice: '', amount: '', include: true, possiblyDuplicate: false },
+    ])
+
+  const includedSum = lines
+    .filter((l) => l.include)
+    .reduce((sum, l) => sum + (parseMoney(l.amount) ?? 0), 0)
+
+  const nextDraft = () => {
+    const i = index + 1
+    if (i >= drafts.length) {
+      setDrafts([])
+      setIndex(0)
+      setLines([])
+    } else {
+      showDraft(drafts, i)
+    }
+  }
+
+  const save = async () => {
+    if (!current) return
+    setError(null)
+    if (paymentMethodId === '') {
+      setError('Choose a payment method.')
+      return
+    }
+    const lineItems: NewLineItem[] = lines
+      .filter((l) => l.include && (l.printedDescription.trim() !== '' || l.itemName.trim() !== ''))
+      .map((l) => ({
+        description: l.printedDescription.trim() || l.itemName.trim(),
+        categoryId: l.categoryId,
+        forMemberId: l.forMemberId === '' ? null : l.forMemberId,
+        quantity: parseMoney(l.quantity),
+        unitPrice: parseMoney(l.unitPrice),
+        amount: parseMoney(l.amount),
+        valueTag: null,
+        notes: null,
+        shortForm: null,
+        fullName: l.itemName.trim() === '' ? null : l.itemName.trim(),
+      }))
+    if (lineItems.length === 0) {
+      setError('Add at least one line (or skip this invoice).')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const saved = await createExpense({
+        merchant: current.result.vendor === 'Unknown' ? 'Amazon' : current.result.vendor,
+        paymentMethodId,
+        date: current.result.date,
+        tax: current.result.tax,
+        notes: null,
+        lineItems,
+        source: 'Invoice',
+        invoiceBlobName: current.result.invoiceBlobName,
+        orderNumber: current.result.orderNumber,
+        invoiceContentHash: current.result.contentHash,
+      })
+      onSaved(saved)
+      nextDraft()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the expense.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (activeMethods.length === 0 || activeCategories.length === 0) {
+    return (
+      <p>
+        Before importing invoices, add at least one payment method and one category under <strong>Settings</strong>.
+      </p>
+    )
+  }
+
+  // Step 1: choose invoice PDFs (one or many — e.g. everything in your Amazon-invoices folder).
+  if (!current) {
+    return (
+      <div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/pdf"
+          multiple
+          hidden
+          onChange={(e) => onPickFiles(e.target.files)}
+        />
+        <div className="row receipt-capture">
+          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={working}>
+            {working ? progress || 'Reading…' : '📄 Choose invoice PDFs'}
+          </button>
+        </div>
+        {error && <p role="alert">{error}</p>}
+        <p className="hint">
+          Pick one or more Amazon/Costco invoice PDFs. The app reads each order, checks it is not already
+          imported (by order number, even if the file was renamed), and shows a draft to review. Nothing is
+          saved until you approve it.
+        </p>
+      </div>
+    )
+  }
+
+  // Step 2: review the current draft.
+  const dup = current.result.duplicate
+  return (
+    <div className="expense-form">
+      <div className="row">
+        <span className="grow">
+          <strong>{current.result.vendor}</strong>
+          {current.result.orderNumber && <> · order {current.result.orderNumber}</>}
+          {current.result.date && <> · {current.result.date}</>}
+          {current.result.grandTotal != null && <> · {current.result.grandTotal.toFixed(2)}</>}
+        </span>
+        <span className="hint">
+          {current.fileName} ({index + 1} of {drafts.length})
+        </span>
+      </div>
+
+      {dup && (
+        <p role="alert" className="dup-banner">
+          ⚠️ {dup.reason} It was imported on {new Date(dup.importedAt).toLocaleDateString()} as {dup.vendor}{' '}
+          {dup.grandTotal.toFixed(2)}. You can skip it, or import anyway if this is a different order.
+        </p>
+      )}
+
+      <div className="row">
+        <label>
+          Payment method
+          <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)}>
+            {activeMethods.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {current.result.grandTotal != null && Math.abs(includedSum - current.result.grandTotal) >= 0.01 && (
+        <p className="hint">
+          Order total is {current.result.grandTotal.toFixed(2)}; included lines add up to {includedSum.toFixed(2)}.
+          {current.result.tax != null && <> Tax {current.result.tax.toFixed(2)} is spread across taxable lines on save.</>}
+        </p>
+      )}
+
+      <h3>Items</h3>
+      {lines.map((line, i) => (
+        <fieldset key={i} className={`line${line.possiblyDuplicate ? ' line-duplicate' : ''}`}>
+          <div className="row">
+            <label className="checkbox">
+              <input type="checkbox" checked={line.include} onChange={(e) => updateLine(i, { include: e.target.checked })} />
+              Include
+            </label>
+            {line.possiblyDuplicate && <span className="hint"> · possibly already recorded on this date</span>}
+            <button type="button" onClick={() => removeLine(i)} style={{ marginLeft: 'auto' }}>
+              Remove
+            </button>
+          </div>
+          <div className="row">
+            <label className="grow">
+              Item name
+              <input value={line.itemName} onChange={(e) => updateLine(i, { itemName: e.target.value })} placeholder="Item name" />
+            </label>
+            <label>
+              Category
+              <select value={line.categoryId} onChange={(e) => updateLine(i, { categoryId: e.target.value })}>
+                {activeCategories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              For
+              <select value={line.forMemberId} onChange={(e) => updateLine(i, { forMemberId: e.target.value })}>
+                <option value="">Family</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="row">
+            <label>
+              Qty
+              <input type="number" step="1" min="0" value={line.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} />
+            </label>
+            <label>
+              Unit price
+              <input type="number" step="0.01" min="0" value={line.unitPrice} onChange={(e) => updateLine(i, { unitPrice: e.target.value })} />
+            </label>
+            <label>
+              Amount
+              <input type="number" step="0.01" min="0" value={line.amount} onChange={(e) => updateLine(i, { amount: e.target.value })} />
+            </label>
+          </div>
+        </fieldset>
+      ))}
+
+      <div className="row">
+        <button type="button" onClick={addLine}>
+          + Add line
+        </button>
+        <span className="total">Included: {includedSum.toFixed(2)}</span>
+      </div>
+
+      {error && <p role="alert">{error}</p>}
+      <div className="row">
+        <button type="button" onClick={save} disabled={saving}>
+          {saving ? 'Saving…' : 'Save expense'}
+        </button>
+        <button type="button" onClick={nextDraft} disabled={saving}>
+          Skip this invoice
+        </button>
+      </div>
+    </div>
+  )
+}

@@ -7,4 +7,7 @@ public enum ExpenseSource
 
     // Created from a photographed receipt (step 11).
     Receipt,
+
+    // Imported from a vendor invoice/order-summary file (e.g. an Amazon PDF).
+    Invoice,
 }
