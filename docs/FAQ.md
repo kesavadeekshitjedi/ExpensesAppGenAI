@@ -477,6 +477,17 @@ If either matches a prior import, the draft shows a warning banner with the earl
 
 The app checks for an **existing expense on the same date with the same total** (preferring the same merchant) and, if it finds one, shows a banner — "This looks like an existing entry: Costco 75.87 on 2026-10-08 (manual, 1 line)" — with an **Update existing entry** button next to **Save as new**. Updating calls `PUT /expenses/{id}`, which replaces that expense's line items, tax, and source and attaches the receipt/invoice, so you don't end up with a manual entry *and* an imported duplicate for the same purchase. This works for invoice import, receipt scan, and **manual entry** too (on save, if your new entry matches an existing one, it asks whether to update it instead). The lookup is `GET /expenses/match?date=&total=&merchant=`. Expense editing was previously deferred (SPEC #52); this adds a scoped replace for exactly this "update instead of duplicate" case.
 
+### Is there a tool to auto-file scanned receipts so I don't rename them by hand?
+
+Yes — `tools/receipt-uploader/Watch-Receipts.ps1` (a **local** PowerShell util; not part of the web app or
+API, never deployed). A phone/scanner tends to save every receipt to the same name, so this watches the
+OneDrive root (`D:\OneDrive`) for `In_Warehouse_Receipt.pdf` / `Gas_Station_Receipt.pdf`, reads the date off
+the receipt, and moves each into `D:\OneDrive\Costo Receipts` as `"<base>_<yyyy-MM-dd_HHmm>.pdf"` so scans
+accumulate uniquely. Run it with `pwsh -File D:\temp\receit_uploader\Watch-Receipts.ps1` (a runnable copy
+lives at `D:\temp\receit_uploader\`); it polls every 30s. See `tools/receipt-uploader/README.md` for why it
+polls rather than using a OneDrive file-creation event, and for Task Scheduler setup. Then import the filed
+PDFs under **Expenses → Import invoice**.
+
 ### Does invoice import cost anything, and where are the PDFs stored?
 
 No extra cost — it reuses the same **F0** Document Intelligence resource as receipts, and stores the PDFs in the existing `receipts` blob container (no new Azure resource, no infra change). `AmazonInvoiceParserTests` unit-test the parser against text mirroring the real samples, and `InvoiceApiTests` drive import → save → re-import with a stub reader to prove the dedup. Locally, with no `DocumentIntelligence:Endpoint`, import returns a clear "not configured" error (manual entry still works).
