@@ -92,6 +92,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               categories={categories}
               paymentMethods={paymentMethods}
               members={members}
+              vehicles={vehicles}
               onSaved={onSaved}
             />
           )}

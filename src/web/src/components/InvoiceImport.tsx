@@ -8,6 +8,7 @@ import {
   type Member,
   type NewLineItem,
   type PaymentMethod,
+  type Vehicle,
 } from '../api'
 
 // One invoice draft waiting to be reviewed (the parsed result plus the file it came from).
@@ -20,6 +21,7 @@ type ReviewLine = {
   itemName: string
   categoryId: string
   forMemberId: string
+  vehicleId: string
   quantity: string
   unitPrice: string
   amount: string
@@ -36,15 +38,18 @@ export default function InvoiceImport({
   categories,
   paymentMethods,
   members,
+  vehicles,
   onSaved,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
   members: Member[]
+  vehicles: Vehicle[]
   onSaved: (expense: Expense) => void
 }) {
   const activeCategories = categories.filter((c) => !c.archived)
   const activeMethods = paymentMethods.filter((p) => !p.archived)
+  const activeVehicles = vehicles.filter((v) => !v.archived)
   const firstCategoryId = activeCategories[0]?.id ?? ''
 
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -65,6 +70,7 @@ export default function InvoiceImport({
       itemName: l.itemFullName ?? l.printedDescription,
       categoryId: activeCategories.some((c) => c.id === l.suggestedCategoryId) ? l.suggestedCategoryId! : firstCategoryId,
       forMemberId: '',
+      vehicleId: '',
       quantity: String(l.quantity),
       unitPrice: String(l.unitPrice),
       amount: String(l.amount),
@@ -114,7 +120,7 @@ export default function InvoiceImport({
   const addLine = () =>
     setLines((prev) => [
       ...prev,
-      { printedDescription: '', itemName: '', categoryId: firstCategoryId, forMemberId: '', quantity: '1', unitPrice: '', amount: '', include: true, possiblyDuplicate: false },
+      { printedDescription: '', itemName: '', categoryId: firstCategoryId, forMemberId: '', vehicleId: '', quantity: '1', unitPrice: '', amount: '', include: true, possiblyDuplicate: false },
     ])
 
   const includedSum = lines
@@ -152,6 +158,7 @@ export default function InvoiceImport({
         notes: null,
         shortForm: null,
         fullName: l.itemName.trim() === '' ? null : l.itemName.trim(),
+        vehicleId: l.vehicleId === '' ? null : l.vehicleId,
       }))
     if (lineItems.length === 0) {
       setError('Add at least one line (or skip this invoice).')
@@ -298,11 +305,24 @@ export default function InvoiceImport({
                 ))}
               </select>
             </label>
+            {activeVehicles.length > 0 && (
+              <label>
+                Vehicle
+                <select value={line.vehicleId} onChange={(e) => updateLine(i, { vehicleId: e.target.value })}>
+                  <option value="">— none —</option>
+                  {activeVehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <div className="row">
             <label>
               Qty
-              <input type="number" step="1" min="0" value={line.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} />
+              <input type="number" step="0.001" min="0" value={line.quantity} onChange={(e) => updateLine(i, { quantity: e.target.value })} />
             </label>
             <label>
               Unit price

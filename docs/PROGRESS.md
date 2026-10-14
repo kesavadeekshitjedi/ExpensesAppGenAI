@@ -230,6 +230,14 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     69 API tests pass (added `AmazonInvoiceParserTests`, `InvoiceApiTests`); web lint/build clean.
     **Not yet pushed/deployed** — DI text quality on the real PDFs is "verify in prod" (same as receipts),
     so expect a parser-tuning pass after the user imports their real files. HTML invoices not yet supported.
+  - **Costco receipts** added to the same import flow (`CostcoReceiptParser`): sample receipts are gas
+    receipts → one **gas line** (gallons→qty, price/gal→unit price), TranID# as the dedup order number,
+    `Date:` M/d/yy. Import review now has a **Vehicle** picker (gas → car, feeds per-vehicle reports). 72
+    API tests pass (added `CostcoReceiptParserTests`); web lint/build clean. **Still unpushed.**
+  - **Requested next (not built yet):** when an import/receipt **matches an existing manual entry** (same
+    date+total, ~merchant), show the match and offer to **update** that entry instead of creating a
+    duplicate — general across invoice import, receipt scan, and manual entry. Needs an expense
+    **replace/update** endpoint (expense edit was deferred, SPEC #52) + UI choices (Update / Create new / Skip).
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

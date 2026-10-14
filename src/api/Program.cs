@@ -135,8 +135,9 @@ else
     builder.Services.AddSingleton<IInvoiceTextReader, NullInvoiceTextReader>();
 }
 
-// Vendor invoice parsers (Amazon first). The import endpoint tries each until one recognizes the text.
+// Vendor invoice parsers (tried in order until one recognizes the text).
 builder.Services.AddSingleton<IInvoiceParser, AmazonInvoiceParser>();
+builder.Services.AddSingleton<IInvoiceParser, CostcoReceiptParser>();
 
 // Session protection keys: in Azure, persist them to Blob Storage and encrypt them with a Key Vault
 // key, both reached through the managed identity. Locally (no Azure config) the default local key
