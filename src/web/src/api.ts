@@ -229,6 +229,7 @@ export type ImportLine = {
   itemFullName: string | null
   suggestedCategoryId: string | null
   suggestedValueTag: string | null
+  suggestedVehicleId: string | null
   possiblyDuplicate: boolean
   duplicateExpenseId: string | null
 }

@@ -26,6 +26,7 @@ public static class InvoiceEndpoints
         string? ItemFullName,
         Guid? SuggestedCategoryId,
         string? SuggestedValueTag,
+        Guid? SuggestedVehicleId,
         bool PossiblyDuplicate,
         Guid? DuplicateExpenseId);
 
@@ -123,6 +124,14 @@ public static class InvoiceEndpoints
                 : [];
 
             var matchIndex = await BuildMatchIndex(db, householdId, parsed.Vendor, ct);
+            var categories = await db.Categories.AsNoTracking()
+                .Where(c => c.HouseholdId == householdId && !c.Archived)
+                .Select(c => new NamedRef(c.Id, c.Name))
+                .ToListAsync(ct);
+            var vehicles = await db.Vehicles.AsNoTracking()
+                .Where(v => v.HouseholdId == householdId && !v.Archived)
+                .Select(v => new NamedRef(v.Id, v.Name))
+                .ToListAsync(ct);
 
             var lines = new List<ImportLineResponse>();
             decimal lineSum = 0;
@@ -131,6 +140,10 @@ public static class InvoiceEndpoints
                 lineSum += line.Amount;
                 matchIndex.TryGetValue(Normalize(line.Description), out var match);
                 sameDayDescriptions.TryGetValue(Normalize(line.Description), out var dupExpenseId);
+                // Prefer a known item's category; otherwise map the parser's category hint (e.g. "Gas")
+                // to the household's matching category so the draft defaults sensibly.
+                var suggestedCategoryId = match?.DefaultCategoryId ?? ResolveCategory(categories, line.SuggestedCategory);
+                var suggestedVehicleId = ResolveVehicleForFuel(vehicles, line.Description, line.SuggestedCategory);
                 lines.Add(new ImportLineResponse(
                     line.Description,
                     line.Quantity ?? 1m,
@@ -139,8 +152,9 @@ public static class InvoiceEndpoints
                     match is not null,
                     match?.ItemId,
                     match?.FullName,
-                    match?.DefaultCategoryId,
+                    suggestedCategoryId,
                     match?.DefaultValueTag,
+                    suggestedVehicleId,
                     dupExpenseId != Guid.Empty,
                     dupExpenseId == Guid.Empty ? null : dupExpenseId));
             }
@@ -224,6 +238,42 @@ public static class InvoiceEndpoints
             index[Normalize(row.PrintedDescription)] = new Match(row.Id, row.FullName, row.DefaultCategoryId, tagName);
         }
         return index;
+    }
+
+    private record NamedRef(Guid Id, string Name);
+
+    // Maps a parser category-name hint (e.g. "Gas") to a household category id. Exact name first, then
+    // gas/fuel synonyms so "Gas", "Fuel" or "Gas/Fuel" all resolve.
+    private static Guid? ResolveCategory(IReadOnlyList<NamedRef> categories, string? hint)
+    {
+        if (string.IsNullOrWhiteSpace(hint))
+        {
+            return null;
+        }
+        var exact = categories.FirstOrDefault(c => string.Equals(c.Name, hint.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (exact is not null)
+        {
+            return exact.Id;
+        }
+        if (hint.Contains("gas", StringComparison.OrdinalIgnoreCase) || hint.Contains("fuel", StringComparison.OrdinalIgnoreCase))
+        {
+            return categories.FirstOrDefault(c =>
+                c.Name.Contains("gas", StringComparison.OrdinalIgnoreCase)
+                || c.Name.Contains("fuel", StringComparison.OrdinalIgnoreCase))?.Id;
+        }
+        return null;
+    }
+
+    // Suggests the vehicle for a fuel line by grade. Household convention: premium fuel is for the GLA 250,
+    // regular fuel is for the Honda. Only applies to gas lines; returns null if no such vehicle exists.
+    private static Guid? ResolveVehicleForFuel(IReadOnlyList<NamedRef> vehicles, string description, string? categoryHint)
+    {
+        if (!string.Equals(categoryHint, "Gas", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        var keyword = description.Contains("premium", StringComparison.OrdinalIgnoreCase) ? "gla" : "honda";
+        return vehicles.FirstOrDefault(v => v.Name.Contains(keyword, StringComparison.OrdinalIgnoreCase))?.Id;
     }
 
     private static bool IsPdf(byte[] bytes) =>

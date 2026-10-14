@@ -234,6 +234,12 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     receipts → one **gas line** (gallons→qty, price/gal→unit price), TranID# as the dedup order number,
     `Date:` M/d/yy. Import review now has a **Vehicle** picker (gas → car, feeds per-vehicle reports). 72
     API tests pass (added `CostcoReceiptParserTests`); web lint/build clean. **Still unpushed.**
+  - **Import UX + category/vehicle defaults.** Import screen now lists every chosen file with a per-file
+    progress bar (queued/reading/done/error + a one-line result) instead of a single "Reading N of M".
+    **Bug fixed:** Costco gas lines defaulted to the first category ("Dining out"); parsers now emit a
+    category hint ("Gas") that the import endpoint maps to the household's matching category. Gas lines also
+    get a **suggested vehicle** by fuel grade (household rule: Premium → GLA 250, Regular → Honda), defaulted
+    in the review's Vehicle picker. `ImportLineResponse` gained `SuggestedVehicleId`; 74 API tests pass.
   - **Match an existing entry → update (not duplicate).** General across invoice import, receipt scan, and
     manual entry: `GET /expenses/match?date=&total=&merchant=` finds an existing expense on the same date
     with the same total (prefers same merchant); the import/receipt draft shows a banner with **Update

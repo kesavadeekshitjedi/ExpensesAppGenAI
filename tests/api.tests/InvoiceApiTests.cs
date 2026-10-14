@@ -34,7 +34,7 @@ public class InvoiceApiTests
 
     private record ImportLine(string printedDescription, decimal quantity, decimal unitPrice, decimal amount,
         bool matched, Guid? itemId, string? itemFullName, Guid? suggestedCategoryId, string? suggestedValueTag,
-        bool possiblyDuplicate, Guid? duplicateExpenseId);
+        Guid? suggestedVehicleId, bool possiblyDuplicate, Guid? duplicateExpenseId);
     private record DuplicateInfo(Guid expenseId, string vendor, string? orderNumber, decimal grandTotal, string reason);
     private record MatchDto(Guid id, string merchant, DateOnly date, decimal total, string source, int lineCount);
     private record ImportResult(string invoiceBlobName, string contentHash, string vendor, string? orderNumber,
@@ -71,6 +71,46 @@ public class InvoiceApiTests
         Assert.Null(draft.duplicate);
         Assert.Equal(2m, draft.lines[1].quantity);
         Assert.Equal(13.98m, draft.lines[1].amount);
+    }
+
+    private const string CostcoGasText = """
+        Redmond #1225
+        Member 112053396512
+        Invoice# 96308
+        Date: 10/07/26
+        Pump Gallons Price
+        18 15.868 $5.799
+        Product Amount
+        Premium $92.02
+        Total Sale $92.02
+        TranID# 628018096308
+        Visit Costco.com
+        """;
+
+    private record CategoryDto(Guid id, string name);
+    private record VehicleDto(Guid id, string name);
+
+    [Fact]
+    public async Task Import_CostcoGas_SuggestsGasCategoryAndPremiumVehicle()
+    {
+        var factory = new TestApiFactory();
+        await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        factory.Invoices.Text = CostcoGasText;
+        var client = factory.CreateClient();
+
+        await client.PostAsJsonAsync("/categories", new { name = "Gas", isTaxable = false });
+        await client.PostAsJsonAsync("/vehicles", new { name = "GLA 250" });
+        await client.PostAsJsonAsync("/vehicles", new { name = "Honda Pilot" });
+        var gasId = (await client.GetFromJsonAsync<List<CategoryDto>>("/categories"))!.First(c => c.name == "Gas").id;
+        var glaId = (await client.GetFromJsonAsync<List<VehicleDto>>("/vehicles"))!.First(v => v.name == "GLA 250").id;
+
+        var draft = await (await client.PostAsync("/invoices/import", PdfForm(FakePdf("gas")))).Content.ReadFromJsonAsync<ImportResult>();
+
+        var line = Assert.Single(draft!.lines);
+        Assert.Equal("Costco Premium Fuel", line.printedDescription);
+        Assert.Equal(gasId, line.suggestedCategoryId);      // mapped the "Gas" hint to the household category
+        Assert.Equal(glaId, line.suggestedVehicleId);       // premium fuel -> GLA 250
     }
 
     [Fact]

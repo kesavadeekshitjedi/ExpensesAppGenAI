@@ -9,8 +9,9 @@ public interface IInvoiceTextReader
 }
 
 // One line of a parsed invoice. Amount is the line's total (quantity x unit price); Quantity/UnitPrice
-// are included when the vendor's format exposes them.
-public record ParsedInvoiceLine(string Description, decimal? Quantity, decimal? UnitPrice, decimal Amount);
+// are included when the vendor's format exposes them. SuggestedCategory is a category-name hint (e.g.
+// "Gas") the endpoint maps to the household's matching category, so the draft defaults sensibly.
+public record ParsedInvoiceLine(string Description, decimal? Quantity, decimal? UnitPrice, decimal Amount, string? SuggestedCategory = null);
 
 // The normalized result of parsing one invoice's text. OrderNumber is the vendor's stable order id
 // (the primary dedup key) when present.

@@ -36,6 +36,17 @@ function parseMoney(value: string): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// Per-file status while a batch of invoices is being read, shown as a list with progress bars.
+type FileState = { name: string; status: 'queued' | 'reading' | 'done' | 'error'; note: string }
+
+function summarize(r: ImportResult): string {
+  if (r.duplicate) return 'Duplicate — already imported'
+  if (r.lines.length === 0 && r.grandTotal == null) return 'No data read — enter manually'
+  const amount = r.grandTotal != null ? ` · ${r.grandTotal.toFixed(2)}` : ''
+  const matched = r.possibleMatch ? ' · matches an existing entry' : ''
+  return `${r.vendor}${amount}${matched}`
+}
+
 export default function InvoiceImport({
   categories,
   paymentMethods,
@@ -60,7 +71,7 @@ export default function InvoiceImport({
   const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
   const [lines, setLines] = useState<ReviewLine[]>([])
   const [working, setWorking] = useState(false)
-  const [progress, setProgress] = useState('')
+  const [fileStates, setFileStates] = useState<FileState[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -72,7 +83,7 @@ export default function InvoiceImport({
       itemName: l.itemFullName ?? l.printedDescription,
       categoryId: activeCategories.some((c) => c.id === l.suggestedCategoryId) ? l.suggestedCategoryId! : firstCategoryId,
       forMemberId: '',
-      vehicleId: '',
+      vehicleId: activeVehicles.some((v) => v.id === l.suggestedVehicleId) ? l.suggestedVehicleId! : '',
       quantity: String(l.quantity),
       unitPrice: String(l.unitPrice),
       amount: String(l.amount),
@@ -91,28 +102,32 @@ export default function InvoiceImport({
     if (!files || files.length === 0) return
     setError(null)
     setWorking(true)
+    const chosen = Array.from(files)
+    setFileStates(chosen.map((f) => ({ name: f.name, status: 'queued', note: 'Queued' })))
+    const patch = (i: number, s: FileState['status'], note: string) =>
+      setFileStates((prev) => prev.map((f, idx) => (idx === i ? { ...f, status: s, note } : f)))
+
     const collected: Draft[] = []
     try {
-      const chosen = Array.from(files)
       for (let i = 0; i < chosen.length; i++) {
-        setProgress(`Reading ${i + 1} of ${chosen.length}…`)
+        patch(i, 'reading', 'Reading…')
         try {
           const result = await importInvoice(chosen[i])
           collected.push({ fileName: chosen[i].name, result })
+          patch(i, 'done', summarize(result))
         } catch (err) {
           collected.push({
             fileName: chosen[i].name,
             // A failed read becomes an empty draft the user can fill in or skip.
             result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, possibleMatch: null, lines: [] },
           })
-          if (err instanceof Error) setError(`${chosen[i].name}: ${err.message}`)
+          patch(i, 'error', err instanceof Error ? err.message : 'Could not read this file')
         }
       }
       setDrafts(collected)
       showDraft(collected, 0)
     } finally {
       setWorking(false)
-      setProgress('')
     }
   }
 
@@ -222,17 +237,42 @@ export default function InvoiceImport({
           hidden
           onChange={(e) => onPickFiles(e.target.files)}
         />
-        <div className="row receipt-capture">
-          <button type="button" onClick={() => fileInputRef.current?.click()} disabled={working}>
-            {working ? progress || 'Reading…' : '📄 Choose invoice PDFs'}
-          </button>
-        </div>
+        {!working && (
+          <div className="row receipt-capture">
+            <button type="button" onClick={() => fileInputRef.current?.click()}>
+              📄 Choose invoice PDFs
+            </button>
+          </div>
+        )}
+
+        {fileStates.length > 0 && (
+          <ul className="import-files">
+            {fileStates.map((f, i) => (
+              <li key={i} className="import-file">
+                <div className="import-file-name">
+                  <span className="import-file-label">{f.name}</span>
+                  <span className="import-file-note">{f.note}</span>
+                </div>
+                <div className={`progress-track ${f.status}`}>
+                  <div
+                    className={`progress-fill ${f.status}`}
+                    style={{ width: f.status === 'done' || f.status === 'error' ? '100%' : f.status === 'queued' ? '0%' : undefined }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {working && <p className="hint">Reading {fileStates.filter((f) => f.status === 'done' || f.status === 'error').length} of {fileStates.length}…</p>}
         {error && <p role="alert">{error}</p>}
-        <p className="hint">
-          Pick one or more Amazon/Costco invoice PDFs. The app reads each order, checks it is not already
-          imported (by order number, even if the file was renamed), and shows a draft to review. Nothing is
-          saved until you approve it.
-        </p>
+        {!working && fileStates.length === 0 && (
+          <p className="hint">
+            Pick one or more Amazon/Costco invoice PDFs. The app reads each order, checks it is not already
+            imported (by order number, even if the file was renamed), and shows a draft to review. Nothing is
+            saved until you approve it.
+          </p>
+        )}
       </div>
     )
   }

@@ -53,7 +53,7 @@ public sealed partial class CostcoReceiptParser : IInvoiceParser
             var amount = product.Success
                 ? decimal.Parse(product.Groups[2].Value.Replace(",", ""), CultureInfo.InvariantCulture)
                 : decimal.Round(gallons * pricePerGallon, 2);
-            return [new ParsedInvoiceLine($"Costco {productName} Fuel", gallons, pricePerGallon, amount)];
+            return [new ParsedInvoiceLine($"Costco {productName} Fuel", gallons, pricePerGallon, amount, SuggestedCategory: "Gas")];
         }
 
         // Non-gas fallback: a single line for the whole receipt total.
