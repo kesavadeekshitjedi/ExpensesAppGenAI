@@ -50,6 +50,7 @@ public static class InvoiceEndpoints
         decimal LineSum,
         decimal Difference,
         DuplicateInfo? Duplicate,
+        ExpenseEndpoints.ExpenseMatch? PossibleMatch,
         List<ImportLineResponse> Lines);
 
     public static void MapInvoiceEndpoints(this IEndpointRouteBuilder app)
@@ -104,13 +105,13 @@ public static class InvoiceEndpoints
             catch (Exception)
             {
                 // The file is saved; let the user enter the lines by hand against this blob.
-                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, []));
+                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, null, []));
             }
 
             var parsed = parsers.Select(p => p.TryParse(text)).FirstOrDefault(r => r is not null);
             if (parsed is null)
             {
-                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, []));
+                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, null, []));
             }
 
             // Invoice-level dedup: same order number (primary) or identical file bytes (secondary).
@@ -144,10 +145,16 @@ public static class InvoiceEndpoints
                     dupExpenseId == Guid.Empty ? null : dupExpenseId));
             }
 
+            // If this isn't a re-import, see whether it matches an existing entry (e.g. a manual one) on
+            // the same date and total, so the user can update that rather than add a duplicate.
+            var possibleMatch = duplicate is null && parsed.OrderDate is DateOnly md && parsed.GrandTotal is decimal mt
+                ? await ExpenseEndpoints.FindMatchAsync(db, householdId, md, mt, parsed.Vendor, ct)
+                : null;
+
             var difference = (parsed.GrandTotal ?? lineSum) - lineSum;
             return Results.Ok(new ImportResponse(
                 blobName, contentHash, parsed.Vendor, parsed.OrderNumber, parsed.OrderDate,
-                parsed.Subtotal, parsed.Tax, parsed.GrandTotal, lineSum, difference, duplicate, lines));
+                parsed.Subtotal, parsed.Tax, parsed.GrandTotal, lineSum, difference, duplicate, possibleMatch, lines));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 

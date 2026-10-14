@@ -32,6 +32,7 @@ public static class ReceiptEndpoints
         decimal? Tax,
         decimal LineSum,
         decimal Difference,
+        ExpenseEndpoints.ExpenseMatch? PossibleMatch,
         List<ScanLineResponse> Lines);
 
     public static void MapReceiptEndpoints(this IEndpointRouteBuilder app)
@@ -84,7 +85,7 @@ public static class ReceiptEndpoints
             catch (Exception)
             {
                 // The image is saved; let the user enter the lines by hand against this blob.
-                return Results.Ok(new ScanResponse(blobName, null, null, null, null, 0m, 0m, []));
+                return Results.Ok(new ScanResponse(blobName, null, null, null, null, 0m, 0m, null, []));
             }
 
             // Match printed lines against this merchant's known receipt descriptions, if the merchant
@@ -113,9 +114,14 @@ public static class ReceiptEndpoints
                     match?.DefaultValueTag));
             }
 
+            // Offer to update an existing entry (e.g. a manual one) on the same date and total.
+            var possibleMatch = extracted.Date is DateOnly md && extracted.Total is decimal mt
+                ? await ExpenseEndpoints.FindMatchAsync(db, householdId, md, mt, extracted.Merchant, ct)
+                : null;
+
             var difference = (extracted.Total ?? lineSum) - lineSum;
             return Results.Ok(new ScanResponse(
-                blobName, extracted.Merchant, extracted.Date, extracted.Total, extracted.Tax, lineSum, difference, lines));
+                blobName, extracted.Merchant, extracted.Date, extracted.Total, extracted.Tax, lineSum, difference, possibleMatch, lines));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 

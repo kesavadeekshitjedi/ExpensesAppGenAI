@@ -47,7 +47,9 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   ].sort()
   const merchantSuggestions = [...new Set(expenses.map((e) => e.merchant))].sort()
 
-  const onSaved = (saved: Expense) => setExpenses((prev) => [saved, ...prev])
+  // Prepend a new expense, or replace it in place when an existing one was updated (same id).
+  const onSaved = (saved: Expense) =>
+    setExpenses((prev) => [saved, ...prev.filter((e) => e.id !== saved.id)])
 
   if (loading) return <p>Loading…</p>
 

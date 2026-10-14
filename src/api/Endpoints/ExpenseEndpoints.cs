@@ -83,64 +83,8 @@ public static class ExpenseEndpoints
             CancellationToken ct) =>
         {
             var householdId = user.GetHouseholdId();
-            var errors = new Dictionary<string, string[]>();
-
-            if (string.IsNullOrWhiteSpace(request.Merchant))
-            {
-                errors["merchant"] = ["Merchant is required."];
-            }
-            if (request.LineItems is null || request.LineItems.Count == 0)
-            {
-                errors["lineItems"] = ["Add at least one line item."];
-            }
-
-            var paymentMethod = await db.PaymentMethods
-                .FirstOrDefaultAsync(p => p.Id == request.PaymentMethodId && p.HouseholdId == householdId, ct);
-            if (paymentMethod is null)
-            {
-                errors["paymentMethodId"] = ["Choose a payment method."];
-            }
-
-            // Load the household's reference names once up front. These are reused both to validate the
-            // request and to build the response, so the save path makes far fewer round-trips to the
-            // (Basic-tier, latency-sensitive) database than re-querying everything after SaveChanges.
-            var categoryRows = await db.Categories.AsNoTracking()
-                .Where(c => c.HouseholdId == householdId)
-                .Select(c => new { c.Id, c.Name, c.IsTaxable })
-                .ToListAsync(ct);
-            var categoryNames = categoryRows.ToDictionary(c => c.Id, c => c.Name);
-            var taxableCategoryIds = categoryRows.Where(c => c.IsTaxable).Select(c => c.Id).ToHashSet();
-            var memberNames = await db.Members.AsNoTracking()
-                .Where(m => m.HouseholdId == householdId)
-                .ToDictionaryAsync(m => m.Id, m => m.DisplayName, ct);
-            var valueTagNames = await db.ValueTags.AsNoTracking()
-                .Where(t => t.HouseholdId == householdId)
-                .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
-            var vehicleNames = await db.Vehicles.AsNoTracking()
-                .Where(v => v.HouseholdId == householdId)
-                .ToDictionaryAsync(v => v.Id, v => v.Name, ct);
-
-            for (var i = 0; request.LineItems is not null && i < request.LineItems.Count; i++)
-            {
-                var line = request.LineItems[i];
-                if (string.IsNullOrWhiteSpace(line.Description))
-                {
-                    errors[$"lineItems[{i}].description"] = ["Description is required."];
-                }
-                if (!categoryNames.ContainsKey(line.CategoryId))
-                {
-                    errors[$"lineItems[{i}].categoryId"] = ["Choose a category for this line."];
-                }
-                if (line.ForMemberId is Guid forId && !memberNames.ContainsKey(forId))
-                {
-                    errors[$"lineItems[{i}].forMemberId"] = ["That member is not in your household."];
-                }
-                if (line.VehicleId is Guid vehId && !vehicleNames.ContainsKey(vehId))
-                {
-                    errors[$"lineItems[{i}].vehicleId"] = ["That vehicle is not in your household."];
-                }
-            }
-
+            var (errors, paymentMethod, categoryNames, taxableCategoryIds, memberNames, valueTagNames, vehicleNames) =
+                await ValidateAndLoadAsync(db, householdId, request, ct);
             if (errors.Count > 0)
             {
                 return Results.ValidationProblem(errors);
@@ -292,6 +236,230 @@ public static class ExpenseEndpoints
                     .ToList());
             return Results.Created($"/expenses/{expense.Id}", response);
         }).RequireAuthorization(AppClaims.ParentPolicy);
+
+        // Find an existing expense that looks like the same purchase (same date and total), so an import
+        // or manual entry can offer to update it instead of creating a duplicate. Whole household can read.
+        group.MapGet("/match", async (DateOnly date, decimal total, string? merchant, ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
+        {
+            var match = await FindMatchAsync(db, user.GetHouseholdId(), date, total, merchant, ct);
+            return match is null ? Results.NoContent() : Results.Ok(match);
+        });
+
+        // Replace an existing expense from a reviewed draft. Used to "update" a matching entry (e.g. a
+        // manual one) when an imported invoice/receipt is found to be the same purchase, instead of adding
+        // a duplicate. Parent only. Replaces the line items, tax, source, and any receipt/invoice link.
+        group.MapPut("/{id:guid}", async (
+            Guid id,
+            CreateExpenseRequest request,
+            ClaimsPrincipal user,
+            ExpensesDbContext db,
+            ItemCatalog catalog,
+            CancellationToken ct) =>
+        {
+            var householdId = user.GetHouseholdId();
+            var (errors, paymentMethod, _, taxableCategoryIds, _, _, _) =
+                await ValidateAndLoadAsync(db, householdId, request, ct);
+            if (errors.Count > 0)
+            {
+                return Results.ValidationProblem(errors);
+            }
+
+            var expense = await db.Expenses.Include(e => e.LineItems)
+                .FirstOrDefaultAsync(e => e.Id == id && e.HouseholdId == householdId, ct);
+            if (expense is null)
+            {
+                return Results.NotFound();
+            }
+
+            var merchant = await GetOrCreateMerchant(db, householdId, request.Merchant.Trim(), ct);
+            var isReceipt = string.Equals(request.Source, nameof(ExpenseSource.Receipt), StringComparison.OrdinalIgnoreCase);
+            var isInvoice = string.Equals(request.Source, nameof(ExpenseSource.Invoice), StringComparison.OrdinalIgnoreCase);
+            var isImported = isReceipt || isInvoice;
+
+            // Remove the old lines and any prior receipt/invoice link, then rebuild from the draft. New
+            // lines are collected in their own list (not added back to the navigation collection) so EF
+            // deletes the old rows and inserts the new ones without a double-delete conflict.
+            db.LineItems.RemoveRange(expense.LineItems.ToList());
+            db.Receipts.RemoveRange(await db.Receipts.Where(r => r.ExpenseId == id).ToListAsync(ct));
+            db.ImportedInvoices.RemoveRange(await db.ImportedInvoices.Where(x => x.ExpenseId == id).ToListAsync(ct));
+
+            expense.MerchantId = merchant.Id;
+            expense.PaymentMethodId = paymentMethod!.Id;
+            expense.Date = request.Date ?? expense.Date;
+            expense.Tax = request.Tax;
+            expense.Notes = Trimmed(request.Notes);
+            expense.Source = isReceipt ? ExpenseSource.Receipt : isInvoice ? ExpenseSource.Invoice : ExpenseSource.Manual;
+
+            var newLines = new List<LineItem>();
+            decimal total = 0;
+            foreach (var line in request.LineItems!)
+            {
+                var quantity = line.Quantity is > 0 ? line.Quantity.Value : 1m;
+                var unitPrice = line.UnitPrice ?? 0m;
+                var amount = line.Amount ?? decimal.Round(quantity * unitPrice, 2);
+                total += amount;
+
+                var item = isImported
+                    ? await catalog.ResolveFromReceiptAsync(householdId, merchant.Id, line.Description.Trim(), line.ItemId, line.FullName, line.CategoryId, ct)
+                    : (await catalog.ResolveAsync(householdId, merchant.Id, line.Description.Trim(), line.CategoryId, line.ShortForm, ct)).Item;
+
+                var valueTag = await catalog.GetOrCreateValueTagAsync(householdId, user.GetMemberId(), line.ValueTag, ct);
+                newLines.Add(new LineItem
+                {
+                    Id = Guid.NewGuid(),
+                    ExpenseId = expense.Id,
+                    Description = line.Description.Trim(),
+                    ItemId = item.Id,
+                    CategoryId = line.CategoryId,
+                    ForMemberId = line.ForMemberId,
+                    Quantity = quantity,
+                    UnitPrice = unitPrice,
+                    Amount = amount,
+                    ValueTagId = valueTag?.Id ?? item.DefaultValueTagId,
+                    VehicleId = line.VehicleId,
+                    Notes = Trimmed(line.Notes),
+                });
+            }
+            expense.Total = total;
+
+            if (expense.Tax is decimal taxAmount && taxAmount > 0)
+            {
+                AllocateTax(newLines, taxableCategoryIds, taxAmount);
+            }
+            db.LineItems.AddRange(newLines);
+
+            if (isReceipt && !string.IsNullOrWhiteSpace(request.ReceiptBlobName))
+            {
+                db.Receipts.Add(new Receipt { Id = Guid.NewGuid(), ExpenseId = expense.Id, ImageBlobName = request.ReceiptBlobName.Trim(), ExtractionStatus = ReceiptExtractionStatus.Extracted });
+            }
+            if (isInvoice && !string.IsNullOrWhiteSpace(request.InvoiceBlobName) && !string.IsNullOrWhiteSpace(request.InvoiceContentHash))
+            {
+                db.ImportedInvoices.Add(new ImportedInvoice
+                {
+                    Id = Guid.NewGuid(),
+                    HouseholdId = householdId,
+                    ExpenseId = expense.Id,
+                    Vendor = merchant.Name,
+                    OrderNumber = Trimmed(request.OrderNumber),
+                    ContentHash = request.InvoiceContentHash.Trim(),
+                    PurchaseDate = expense.Date,
+                    GrandTotal = expense.Total,
+                    BlobName = request.InvoiceBlobName.Trim(),
+                });
+            }
+            await db.SaveChangesAsync(ct);
+
+            var reloaded = await LoadExpenses(db, householdId).FirstAsync(e => e.Id == id, ct);
+            var responses = await ToResponses(db, householdId, [reloaded], ct);
+            return Results.Ok(responses[0]);
+        }).RequireAuthorization(AppClaims.ParentPolicy);
+    }
+
+    public record ExpenseMatch(Guid Id, string Merchant, DateOnly Date, decimal Total, string Source, int LineCount);
+
+    // Finds an existing expense that looks like the same purchase: same date and a total within a cent,
+    // preferring one from the same merchant. Used so an import/receipt/manual entry can offer to update a
+    // match (e.g. a manual entry the user is now importing a receipt for) rather than create a duplicate.
+    public static async Task<ExpenseMatch?> FindMatchAsync(
+        ExpensesDbContext db, Guid householdId, DateOnly date, decimal total, string? merchant, CancellationToken ct)
+    {
+        var sameDay = await db.Expenses.AsNoTracking()
+            .Where(e => e.HouseholdId == householdId && e.Date == date)
+            .Include(e => e.LineItems)
+            .ToListAsync(ct);
+        var matches = sameDay.Where(e => Math.Abs(e.Total - total) <= 0.01m).ToList();
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        Expense? best = null;
+        if (!string.IsNullOrWhiteSpace(merchant))
+        {
+            var merchantId = await db.Merchants.AsNoTracking()
+                .Where(m => m.HouseholdId == householdId && m.Name == merchant.Trim())
+                .Select(m => (Guid?)m.Id)
+                .FirstOrDefaultAsync(ct);
+            if (merchantId is Guid mid)
+            {
+                best = matches.FirstOrDefault(e => e.MerchantId == mid);
+            }
+        }
+        best ??= matches[0];
+
+        var merchantName = await db.Merchants.AsNoTracking()
+            .Where(m => m.Id == best.MerchantId).Select(m => m.Name).FirstOrDefaultAsync(ct) ?? "(unknown)";
+        return new ExpenseMatch(best.Id, merchantName, best.Date, best.Total, best.Source.ToString(), best.LineItems.Count);
+    }
+
+    // Validates a create/replace request and loads the household's reference names once (reused for
+    // validation and response building). Returns the collected errors plus the looked-up references.
+    private static async Task<(
+        Dictionary<string, string[]> Errors,
+        PaymentMethod? PaymentMethod,
+        Dictionary<Guid, string> CategoryNames,
+        HashSet<Guid> TaxableCategoryIds,
+        Dictionary<Guid, string> MemberNames,
+        Dictionary<Guid, string> ValueTagNames,
+        Dictionary<Guid, string> VehicleNames)>
+        ValidateAndLoadAsync(ExpensesDbContext db, Guid householdId, CreateExpenseRequest request, CancellationToken ct)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (string.IsNullOrWhiteSpace(request.Merchant))
+        {
+            errors["merchant"] = ["Merchant is required."];
+        }
+        if (request.LineItems is null || request.LineItems.Count == 0)
+        {
+            errors["lineItems"] = ["Add at least one line item."];
+        }
+
+        var paymentMethod = await db.PaymentMethods
+            .FirstOrDefaultAsync(p => p.Id == request.PaymentMethodId && p.HouseholdId == householdId, ct);
+        if (paymentMethod is null)
+        {
+            errors["paymentMethodId"] = ["Choose a payment method."];
+        }
+
+        var categoryRows = await db.Categories.AsNoTracking()
+            .Where(c => c.HouseholdId == householdId)
+            .Select(c => new { c.Id, c.Name, c.IsTaxable })
+            .ToListAsync(ct);
+        var categoryNames = categoryRows.ToDictionary(c => c.Id, c => c.Name);
+        var taxableCategoryIds = categoryRows.Where(c => c.IsTaxable).Select(c => c.Id).ToHashSet();
+        var memberNames = await db.Members.AsNoTracking()
+            .Where(m => m.HouseholdId == householdId)
+            .ToDictionaryAsync(m => m.Id, m => m.DisplayName, ct);
+        var valueTagNames = await db.ValueTags.AsNoTracking()
+            .Where(t => t.HouseholdId == householdId)
+            .ToDictionaryAsync(t => t.Id, t => t.Name, ct);
+        var vehicleNames = await db.Vehicles.AsNoTracking()
+            .Where(v => v.HouseholdId == householdId)
+            .ToDictionaryAsync(v => v.Id, v => v.Name, ct);
+
+        for (var i = 0; request.LineItems is not null && i < request.LineItems.Count; i++)
+        {
+            var line = request.LineItems[i];
+            if (string.IsNullOrWhiteSpace(line.Description))
+            {
+                errors[$"lineItems[{i}].description"] = ["Description is required."];
+            }
+            if (!categoryNames.ContainsKey(line.CategoryId))
+            {
+                errors[$"lineItems[{i}].categoryId"] = ["Choose a category for this line."];
+            }
+            if (line.ForMemberId is Guid forId && !memberNames.ContainsKey(forId))
+            {
+                errors[$"lineItems[{i}].forMemberId"] = ["That member is not in your household."];
+            }
+            if (line.VehicleId is Guid vehId && !vehicleNames.ContainsKey(vehId))
+            {
+                errors[$"lineItems[{i}].vehicleId"] = ["That vehicle is not in your household."];
+            }
+        }
+
+        return (errors, paymentMethod, categoryNames, taxableCategoryIds, memberNames, valueTagNames, vehicleNames);
     }
 
     private static IQueryable<Expense> LoadExpenses(ExpensesDbContext db, Guid householdId) =>

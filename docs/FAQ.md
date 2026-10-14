@@ -473,6 +473,10 @@ Two keys, checked at import time (see `InvoiceEndpoints` / `ImportedInvoice`):
 
 If either matches a prior import, the draft shows a warning banner with the earlier expense; you can **Skip** or import anyway. Separately, each line is checked against items already recorded **on the same purchase date** and flagged "possibly already recorded" — those lines default to **excluded** so a re-import doesn't double-count. (Real example from the samples: `inv4.pdf` and `invoice1.pdf` are the same order with different byte sizes — the order-number key catches it, the hash alone would not.)
 
+### What if an import/receipt matches an expense I already entered by hand?
+
+The app checks for an **existing expense on the same date with the same total** (preferring the same merchant) and, if it finds one, shows a banner — "This looks like an existing entry: Costco 75.87 on 2026-10-08 (manual, 1 line)" — with an **Update existing entry** button next to **Save as new**. Updating calls `PUT /expenses/{id}`, which replaces that expense's line items, tax, and source and attaches the receipt/invoice, so you don't end up with a manual entry *and* an imported duplicate for the same purchase. This works for invoice import, receipt scan, and **manual entry** too (on save, if your new entry matches an existing one, it asks whether to update it instead). The lookup is `GET /expenses/match?date=&total=&merchant=`. Expense editing was previously deferred (SPEC #52); this adds a scoped replace for exactly this "update instead of duplicate" case.
+
 ### Does invoice import cost anything, and where are the PDFs stored?
 
 No extra cost — it reuses the same **F0** Document Intelligence resource as receipts, and stores the PDFs in the existing `receipts` blob container (no new Azure resource, no infra change). `AmazonInvoiceParserTests` unit-test the parser against text mirroring the real samples, and `InvoiceApiTests` drive import → save → re-import with a stub reader to prove the dedup. Locally, with no `DocumentIntelligence:Endpoint`, import returns a clear "not configured" error (manual entry still works).

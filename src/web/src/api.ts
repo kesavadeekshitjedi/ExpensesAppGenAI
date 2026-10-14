@@ -213,6 +213,7 @@ export type ScanResult = {
   tax: number | null
   lineSum: number
   difference: number
+  possibleMatch: ExpenseMatch | null
   lines: ScanLine[]
 }
 
@@ -242,6 +243,17 @@ export type InvoiceDuplicate = {
   reason: string
 }
 
+// An existing expense that looks like the same purchase (same date + total), so an import/receipt/manual
+// entry can offer to update it instead of creating a duplicate.
+export type ExpenseMatch = {
+  id: string
+  merchant: string
+  date: string
+  total: number
+  source: string
+  lineCount: number
+}
+
 export type ImportResult = {
   invoiceBlobName: string
   contentHash: string
@@ -254,6 +266,7 @@ export type ImportResult = {
   lineSum: number
   difference: number
   duplicate: InvoiceDuplicate | null
+  possibleMatch: ExpenseMatch | null
   lines: ImportLine[]
 }
 
@@ -485,4 +498,22 @@ export async function createExpense(expense: NewExpense): Promise<Expense> {
   const problem = (await res.json().catch(() => null)) as { title?: string; errors?: Record<string, string[]> } | null
   const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
   throw new Error(firstError ?? problem?.title ?? 'Could not save the expense.')
+}
+
+// Replaces an existing expense (used to "update" a matching entry instead of adding a duplicate).
+export async function replaceExpense(id: string, expense: NewExpense): Promise<Expense> {
+  const res = await apiFetch(`/expenses/${id}`, { method: 'PUT', body: JSON.stringify(expense) })
+  if (res.ok) return (await res.json()) as Expense
+  const problem = (await res.json().catch(() => null)) as { title?: string; errors?: Record<string, string[]> } | null
+  const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
+  throw new Error(firstError ?? problem?.title ?? 'Could not update the expense.')
+}
+
+// Finds an existing expense that looks like the same purchase (same date + total), or null.
+export async function findExpenseMatch(date: string, total: number, merchant?: string): Promise<ExpenseMatch | null> {
+  const params = new URLSearchParams({ date, total: String(total) })
+  if (merchant) params.set('merchant', merchant)
+  const res = await apiFetch(`/expenses/match?${params.toString()}`)
+  if (res.status === 204 || !res.ok) return null
+  return (await res.json()) as ExpenseMatch
 }

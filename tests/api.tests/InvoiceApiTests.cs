@@ -36,9 +36,10 @@ public class InvoiceApiTests
         bool matched, Guid? itemId, string? itemFullName, Guid? suggestedCategoryId, string? suggestedValueTag,
         bool possiblyDuplicate, Guid? duplicateExpenseId);
     private record DuplicateInfo(Guid expenseId, string vendor, string? orderNumber, decimal grandTotal, string reason);
+    private record MatchDto(Guid id, string merchant, DateOnly date, decimal total, string source, int lineCount);
     private record ImportResult(string invoiceBlobName, string contentHash, string vendor, string? orderNumber,
         DateOnly? date, decimal? subtotal, decimal? tax, decimal? grandTotal, decimal lineSum, decimal difference,
-        DuplicateInfo? duplicate, List<ImportLine> lines);
+        DuplicateInfo? duplicate, MatchDto? possibleMatch, List<ImportLine> lines);
 
     private static MultipartFormDataContent PdfForm(byte[] bytes)
     {
@@ -114,5 +115,57 @@ public class InvoiceApiTests
         Assert.Contains("already imported", again.duplicate.reason);
         // Every line is also flagged as already recorded on the same date.
         Assert.All(again.lines, l => Assert.True(l.possiblyDuplicate));
+    }
+
+    private record ExpenseLineDto(string description, decimal amount, string? vehicle);
+    private record ExpenseDto(Guid id, string source, decimal total, List<ExpenseLineDto> lineItems);
+
+    [Fact]
+    public async Task Import_MatchingAManualEntry_OffersUpdateAndReplacesIt()
+    {
+        var factory = new TestApiFactory();
+        var (category, method) = await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        factory.Invoices.Text = AmazonText;
+        var client = factory.CreateClient();
+
+        // A manual entry for the same day and total ($24.34) the Amazon order comes to.
+        var manual = await client.PostAsJsonAsync("/expenses", new
+        {
+            merchant = "Amazon",
+            paymentMethodId = method.Id,
+            date = new DateOnly(2026, 10, 12),
+            lineItems = new[] { new { description = "Stuff", categoryId = category.Id, amount = 24.34m } },
+        });
+        manual.EnsureSuccessStatusCode();
+        var manualExpense = await manual.Content.ReadFromJsonAsync<ExpenseDto>();
+
+        // Importing the invoice detects the manual entry as a possible match.
+        var draft = await (await client.PostAsync("/invoices/import", PdfForm(FakePdf("x")))).Content.ReadFromJsonAsync<ImportResult>();
+        Assert.NotNull(draft!.possibleMatch);
+        Assert.Equal(manualExpense!.id, draft.possibleMatch!.id);
+
+        // Updating that entry replaces its lines and marks it an invoice (no new expense created).
+        var put = await client.PutAsJsonAsync($"/expenses/{manualExpense.id}", new
+        {
+            merchant = draft.vendor,
+            paymentMethodId = method.Id,
+            date = draft.date,
+            tax = draft.tax,
+            lineItems = draft.lines.Select(l => new { description = l.printedDescription, categoryId = category.Id, quantity = l.quantity, unitPrice = l.unitPrice, amount = l.amount, fullName = l.printedDescription }),
+            source = "Invoice",
+            invoiceBlobName = draft.invoiceBlobName,
+            orderNumber = draft.orderNumber,
+            invoiceContentHash = draft.contentHash,
+        });
+        put.EnsureSuccessStatusCode();
+        var updated = await put.Content.ReadFromJsonAsync<ExpenseDto>();
+
+        Assert.Equal(manualExpense.id, updated!.id);  // same expense, replaced
+        Assert.Equal("Invoice", updated.source);
+        Assert.Equal(2, updated.lineItems.Count);
+
+        var all = await client.GetFromJsonAsync<List<ExpenseDto>>("/expenses");
+        Assert.Single(all!); // still one expense, not a duplicate
     }
 }

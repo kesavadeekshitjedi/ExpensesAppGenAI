@@ -2,10 +2,12 @@ import { useRef, useState } from 'react'
 import {
   createExpense,
   importInvoice,
+  replaceExpense,
   type Category,
   type Expense,
   type ImportResult,
   type Member,
+  type NewExpense,
   type NewLineItem,
   type PaymentMethod,
   type Vehicle,
@@ -101,7 +103,7 @@ export default function InvoiceImport({
           collected.push({
             fileName: chosen[i].name,
             // A failed read becomes an empty draft the user can fill in or skip.
-            result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, lines: [] },
+            result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, possibleMatch: null, lines: [] },
           })
           if (err instanceof Error) setError(`${chosen[i].name}: ${err.message}`)
         }
@@ -138,12 +140,11 @@ export default function InvoiceImport({
     }
   }
 
-  const save = async () => {
-    if (!current) return
-    setError(null)
+  const buildPayload = (): NewExpense | null => {
+    if (!current) return null
     if (paymentMethodId === '') {
       setError('Choose a payment method.')
-      return
+      return null
     }
     const lineItems: NewLineItem[] = lines
       .filter((l) => l.include && (l.printedDescription.trim() !== '' || l.itemName.trim() !== ''))
@@ -162,23 +163,30 @@ export default function InvoiceImport({
       }))
     if (lineItems.length === 0) {
       setError('Add at least one line (or skip this invoice).')
-      return
+      return null
     }
+    return {
+      merchant: current.result.vendor === 'Unknown' ? 'Amazon' : current.result.vendor,
+      paymentMethodId,
+      date: current.result.date,
+      tax: current.result.tax,
+      notes: null,
+      lineItems,
+      source: 'Invoice',
+      invoiceBlobName: current.result.invoiceBlobName,
+      orderNumber: current.result.orderNumber,
+      invoiceContentHash: current.result.contentHash,
+    }
+  }
 
+  // Create a new expense, or update the matched existing one (so it isn't duplicated).
+  const persist = async (action: (payload: NewExpense) => Promise<Expense>) => {
+    setError(null)
+    const payload = buildPayload()
+    if (!payload) return
     setSaving(true)
     try {
-      const saved = await createExpense({
-        merchant: current.result.vendor === 'Unknown' ? 'Amazon' : current.result.vendor,
-        paymentMethodId,
-        date: current.result.date,
-        tax: current.result.tax,
-        notes: null,
-        lineItems,
-        source: 'Invoice',
-        invoiceBlobName: current.result.invoiceBlobName,
-        orderNumber: current.result.orderNumber,
-        invoiceContentHash: current.result.contentHash,
-      })
+      const saved = await action(payload)
       onSaved(saved)
       nextDraft()
     } catch (err) {
@@ -186,6 +194,12 @@ export default function InvoiceImport({
     } finally {
       setSaving(false)
     }
+  }
+
+  const save = () => persist(createExpense)
+  const updateExisting = () => {
+    const id = current?.result.possibleMatch?.id
+    if (id) persist((payload) => replaceExpense(id, payload))
   }
 
   if (activeMethods.length === 0 || activeCategories.length === 0) {
@@ -225,6 +239,7 @@ export default function InvoiceImport({
 
   // Step 2: review the current draft.
   const dup = current.result.duplicate
+  const match = current.result.possibleMatch
   return (
     <div className="expense-form">
       <div className="row">
@@ -243,6 +258,14 @@ export default function InvoiceImport({
         <p role="alert" className="dup-banner">
           ⚠️ {dup.reason} It was imported on {new Date(dup.importedAt).toLocaleDateString()} as {dup.vendor}{' '}
           {dup.grandTotal.toFixed(2)}. You can skip it, or import anyway if this is a different order.
+        </p>
+      )}
+
+      {!dup && match && (
+        <p className="dup-banner">
+          ℹ️ This looks like an existing entry: <strong>{match.merchant} {match.total.toFixed(2)}</strong> on{' '}
+          {match.date} ({match.source.toLowerCase()}, {match.lineCount} line{match.lineCount === 1 ? '' : 's'}).
+          Use <strong>Update existing entry</strong> to replace it instead of adding a duplicate.
         </p>
       )}
 
@@ -345,8 +368,13 @@ export default function InvoiceImport({
 
       {error && <p role="alert">{error}</p>}
       <div className="row">
+        {match && !dup && (
+          <button type="button" onClick={updateExisting} disabled={saving}>
+            {saving ? 'Updating…' : 'Update existing entry'}
+          </button>
+        )}
         <button type="button" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save expense'}
+          {saving ? 'Saving…' : match && !dup ? 'Save as new' : 'Save expense'}
         </button>
         <button type="button" onClick={nextDraft} disabled={saving}>
           Skip this invoice

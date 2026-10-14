@@ -1,14 +1,17 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   createExpense,
+  findExpenseMatch,
   getFuelPrice,
   getItemLastPrice,
   getTaxRate,
+  replaceExpense,
   type Category,
   type Expense,
   type FuelPrice,
   type LastPrice,
   type Member,
+  type NewExpense,
   type NewLineItem,
   type PaymentMethod,
   type Vehicle,
@@ -250,16 +253,33 @@ export default function ExpenseForm({
       return
     }
 
+    const payload: NewExpense = {
+      merchant: merchant.trim(),
+      paymentMethodId,
+      date,
+      tax: parseMoney(tax),
+      notes: notes.trim() === '' ? null : notes.trim(),
+      lineItems,
+    }
+
     setSaving(true)
     try {
-      const saved = await createExpense({
-        merchant: merchant.trim(),
-        paymentMethodId,
-        date,
-        tax: parseMoney(tax),
-        notes: notes.trim() === '' ? null : notes.trim(),
-        lineItems,
-      })
+      // If this looks like an existing entry (same date + total), offer to update it, not duplicate it.
+      const total = lineItems.reduce((sum, l) => sum + (l.amount ?? 0), 0)
+      const match = await findExpenseMatch(date, total, merchant.trim())
+      let saved: Expense
+      if (
+        match &&
+        window.confirm(
+          `This looks like an existing entry: ${match.merchant} ${match.total.toFixed(2)} on ${match.date} ` +
+            `(${match.source.toLowerCase()}, ${match.lineCount} line${match.lineCount === 1 ? '' : 's'}).\n\n` +
+            `OK = update that entry · Cancel = add a new one.`,
+        )
+      ) {
+        saved = await replaceExpense(match.id, payload)
+      } else {
+        saved = await createExpense(payload)
+      }
       // Reset for the next entry, keeping merchant/payment method handy.
       setLines([emptyLine(firstCategoryId, defaultFor)])
       setNotes('')

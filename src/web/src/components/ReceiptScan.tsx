@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   createExpense,
   getItems,
+  replaceExpense,
   scanReceipt,
   type Category,
   type Expense,
   type Item,
   type Member,
+  type NewExpense,
   type NewLineItem,
   type PaymentMethod,
   type ScanLine,
@@ -130,11 +132,10 @@ export default function ReceiptScan({
     setError(null)
   }
 
-  const save = async () => {
-    setError(null)
+  const buildPayload = (): NewExpense | null => {
     if (merchant.trim() === '') {
       setError('Enter the merchant.')
-      return
+      return null
     }
     const lineItems: NewLineItem[] = lines
       .filter((l) => l.printedDescription.trim() !== '' || l.itemName.trim() !== '')
@@ -152,21 +153,28 @@ export default function ReceiptScan({
       }))
     if (lineItems.length === 0) {
       setError('Add at least one line.')
-      return
+      return null
     }
+    return {
+      merchant: merchant.trim(),
+      paymentMethodId,
+      date: date || null,
+      tax: parseMoney(tax),
+      notes: null,
+      lineItems,
+      source: 'Receipt',
+      receiptBlobName: draft!.receiptBlobName,
+    }
+  }
 
+  // Create a new expense, or update the matched existing one (so it isn't duplicated).
+  const persist = async (action: (payload: NewExpense) => Promise<Expense>) => {
+    setError(null)
+    const payload = buildPayload()
+    if (!payload) return
     setSaving(true)
     try {
-      const saved = await createExpense({
-        merchant: merchant.trim(),
-        paymentMethodId,
-        date: date || null,
-        tax: parseMoney(tax),
-        notes: null,
-        lineItems,
-        source: 'Receipt',
-        receiptBlobName: draft!.receiptBlobName,
-      })
+      const saved = await action(payload)
       onSaved(saved)
       reset()
     } catch (err) {
@@ -174,6 +182,12 @@ export default function ReceiptScan({
     } finally {
       setSaving(false)
     }
+  }
+
+  const save = () => persist(createExpense)
+  const updateExisting = () => {
+    const id = draft?.possibleMatch?.id
+    if (id) persist((payload) => replaceExpense(id, payload))
   }
 
   if (activeMethods.length === 0 || activeCategories.length === 0) {
@@ -257,6 +271,15 @@ export default function ReceiptScan({
         <p role="alert" className="hint">
           Heads up: the receipt total is {draft.total.toFixed(2)} but the lines add up to {lineSum.toFixed(2)} (a
           difference of {difference.toFixed(2)}). Adjust the lines or tax if needed.
+        </p>
+      )}
+
+      {draft.possibleMatch && (
+        <p className="dup-banner">
+          ℹ️ This looks like an existing entry: <strong>{draft.possibleMatch.merchant} {draft.possibleMatch.total.toFixed(2)}</strong>{' '}
+          on {draft.possibleMatch.date} ({draft.possibleMatch.source.toLowerCase()}, {draft.possibleMatch.lineCount} line
+          {draft.possibleMatch.lineCount === 1 ? '' : 's'}). Use <strong>Update existing entry</strong> to replace it
+          instead of adding a duplicate.
         </p>
       )}
 
@@ -355,8 +378,13 @@ export default function ReceiptScan({
 
       {error && <p role="alert">{error}</p>}
       <div className="row">
+        {draft.possibleMatch && (
+          <button type="button" onClick={updateExisting} disabled={saving}>
+            {saving ? 'Updating…' : 'Update existing entry'}
+          </button>
+        )}
         <button type="button" onClick={save} disabled={saving}>
-          {saving ? 'Saving…' : 'Save expense'}
+          {saving ? 'Saving…' : draft.possibleMatch ? 'Save as new' : 'Save expense'}
         </button>
         <button type="button" onClick={reset}>
           Discard &amp; start over
