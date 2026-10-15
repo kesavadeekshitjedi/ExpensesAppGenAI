@@ -15,6 +15,8 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  getCategories,
+  getCategoryPriceHistory,
   getItemPriceHistory,
   getItems,
   getReportSummary,
@@ -181,25 +183,30 @@ function CategoryBars({ buckets }: { buckets: Bucket[] }) {
 
 function ItemPriceTrend({ from, to }: { from: string; to: string }) {
   const [items, setItems] = useState<{ id: string; fullName: string }[]>([])
-  const [itemId, setItemId] = useState('')
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  // The selection encodes which dimension was picked: "item:<id>" or "cat:<id>".
+  const [sel, setSel] = useState('')
   const [history, setHistory] = useState<ItemPriceHistory | null>(null)
 
   useEffect(() => {
     getItems()
       .then((list) => setItems(list.map((i) => ({ id: i.id, fullName: i.fullName }))))
       .catch(() => {})
+    getCategories()
+      .then((list) => setCategories(list.filter((c) => !c.archived).map((c) => ({ id: c.id, name: c.name }))))
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
-    if (!itemId) return
+    if (!sel) return
     let active = true
-    getItemPriceHistory(itemId, from, to)
-      .then((h) => active && setHistory(h))
-      .catch(() => active && setHistory(null))
+    const [kind, id] = [sel.slice(0, sel.indexOf(':')), sel.slice(sel.indexOf(':') + 1)]
+    const fetchHistory = kind === 'cat' ? getCategoryPriceHistory(id, from, to) : getItemPriceHistory(id, from, to)
+    fetchHistory.then((h) => active && setHistory(h)).catch(() => active && setHistory(null))
     return () => {
       active = false
     }
-  }, [itemId, from, to])
+  }, [sel, from, to])
 
   // Plot one line per store so you can compare which merchant is cheaper over time. Unit price is used
   // when the item has one; otherwise the line amount. Each date becomes a row with a column per store.
@@ -222,19 +229,31 @@ function ItemPriceTrend({ from, to }: { from: string; to: string }) {
     <div className="chart-card">
       <h3>Item price trend</h3>
       <label className="price-trend-pick">
-        Item
-        <select value={itemId} onChange={(e) => setItemId(e.target.value)}>
-          <option value="">Choose an item…</option>
-          {items.map((i) => (
-            <option key={i.id} value={i.id}>
-              {i.fullName}
-            </option>
-          ))}
+        Item or category
+        <select value={sel} onChange={(e) => setSel(e.target.value)}>
+          <option value="">Choose an item or category…</option>
+          <optgroup label="Categories (all items in it)">
+            {categories.map((c) => (
+              <option key={c.id} value={`cat:${c.id}`}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="Items">
+            {items.map((i) => (
+              <option key={i.id} value={`item:${i.id}`}>
+                {i.fullName}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </label>
 
-      {!itemId ? (
-        <p className="hint">Pick an item to see how its price changed over time, and which store is cheaper.</p>
+      {!sel ? (
+        <p className="hint">
+          Pick an item to compare its price across stores — or a category (e.g. Gas) to trend every purchase in
+          it, handy when they're split across items like Premium/Regular fuel.
+        </p>
       ) : data.length === 0 ? (
         <p className="hint">No price history for this item in the selected period.</p>
       ) : (

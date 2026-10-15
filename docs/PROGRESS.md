@@ -305,6 +305,16 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     `src/api` and `tests/api.tests` (a direct reference overrides the vulnerable transitive version).
     `dotnet list package --vulnerable --include-transitive` now reports **no vulnerable packages** and the
     build is warning-free. Remove the pins once the parent packages reference the patched versions.
+  - **Bug — stale app after deploy (service worker).** New deploys weren't reaching the browser: the SW
+    served the previous build. Fixed `sw.js` to fetch the app shell with `cache:'no-store'` (always the
+    latest `index.html` → correct asset hashes) and bumped the cache to `v2`; `main.tsx` now reloads the tab
+    once when a newly deployed worker takes control. (FAQ → Security: how to unstick a stuck tab.)
+  - **Bug — Gas price trend showed a single point.** Gas is itemized into separate items (Costco Premium
+    Fuel, Costco Regular Fuel, and a stray "Gas"), so the per-**item** trend for any one of them is sparse.
+    Fixed by letting the **Item Price Trend** chart trend a whole **category**: `/reports/item-price-history`
+    now accepts `categoryId` (alternative to `itemId`) and returns every line in that category; the Reports
+    picker gained a "Categories" optgroup, so choosing **Gas** plots all fill-ups (split by store, $/gal).
+    83 API tests pass (added category-aggregation test); web lint/build clean.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

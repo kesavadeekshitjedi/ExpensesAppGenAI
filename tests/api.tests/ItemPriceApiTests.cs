@@ -38,4 +38,33 @@ public class ItemPriceApiTests
         var res = await client.GetAsync("/items/last-price?name=Nonexistent");
         Assert.Equal(HttpStatusCode.NoContent, res.StatusCode);
     }
+
+    private record PricePointDto(string date, decimal unitPrice, decimal amount, decimal quantity, string merchant);
+    private record PriceHistoryDto(Guid itemId, string fullName, List<PricePointDto> points);
+
+    // Gas gets itemized into separate items (Premium/Regular fuel), so the per-item trend is sparse.
+    // The category trend aggregates them, which is what the user actually wants to see.
+    [Fact]
+    public async Task PriceHistory_ByCategory_AggregatesAllItemsInIt()
+    {
+        var factory = new TestApiFactory();
+        var (_, method) = await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        var client = factory.CreateClient();
+
+        var gas = await (await client.PostAsJsonAsync("/categories", new { name = "Gas", isTaxable = false })).Content.ReadFromJsonAsync<CategoryDto>();
+
+        // Two fill-ups on different dates, recorded as different items (premium vs regular).
+        await client.PostAsJsonAsync("/expenses", new ExpensePayload("Costco Gas", method.Id, "2026-10-01", null, null,
+            [new LinePayload("Costco Premium Fuel", gas!.id, 5.80m, 92.02m)]));
+        await client.PostAsJsonAsync("/expenses", new ExpensePayload("Costco Gas", method.Id, "2026-10-08", null, null,
+            [new LinePayload("Costco Regular Fuel", gas.id, 5.20m, 75.00m)]));
+
+        // Per-item history is sparse (one point each); the category history has both.
+        var byCategory = await client.GetFromJsonAsync<PriceHistoryDto>($"/reports/item-price-history?categoryId={gas.id}");
+        Assert.Equal("Gas", byCategory!.fullName);
+        Assert.Equal(2, byCategory.points.Count);
+    }
+
+    private record CategoryDto(Guid id, string name);
 }

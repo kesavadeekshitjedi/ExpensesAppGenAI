@@ -476,6 +476,15 @@ export function getItemPriceHistory(itemId: string, from?: string, to?: string):
   return getJson<ItemPriceHistory>(`/reports/item-price-history?${params.toString()}`)
 }
 
+// Price history for a whole category (e.g. all gas fill-ups), when its purchases are split across several
+// items. Same shape as the per-item history; the chart splits it by store.
+export function getCategoryPriceHistory(categoryId: string, from?: string, to?: string): Promise<ItemPriceHistory> {
+  const params = new URLSearchParams({ categoryId })
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return getJson<ItemPriceHistory>(`/reports/item-price-history?${params.toString()}`)
+}
+
 // ----- Fuel price hint (EIA) -----
 
 export type FuelPrice = {

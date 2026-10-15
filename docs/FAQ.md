@@ -488,6 +488,7 @@ Yes — every category dropdown (import, receipt scan, manual entry, Find & edit
 Yes. Because each line is saved as its own line item linked to an **Item** (via `ItemCatalog.ResolveFromReceiptAsync`, which runs for invoices and receipts alike) and to the **merchant/store** read off the bill, reports can slice both ways:
 - **Reports → By category** and **By item** break the period down to the category (e.g. "Vegetables") and the individual item (e.g. "Dosakai").
 - **Reports → Item price trend**: pick an item to see its price over time with **one line per store**, so you can tell which store is cheaper per month. (The store comes from the bill's merchant — editable in the review step if the OCR reads it wrong, so keep it accurate.)
+- You can also pick a **category** there (the "Categories" group in the dropdown) to trend **every purchase in that category**, even when it's split across several items. This is how you get a **Gas** trend: fill-ups are itemized as *Costco Premium Fuel* / *Costco Regular Fuel* (and sometimes a plain *Gas*), so no single item holds the whole history — choosing the **Gas category** plots them all (by $/gal, split by store). `GET /reports/item-price-history` accepts either `itemId` or `categoryId`.
 
 ### How does it detect a duplicate invoice (same order uploaded twice)?
 

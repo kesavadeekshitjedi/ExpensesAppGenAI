@@ -139,21 +139,49 @@ public static class ReportEndpoints
             return Results.Ok(new TrendResponse(start, end, unit, points));
         });
 
-        // Price history for one item over time, for the per-item price-trend chart.
+        // Price history over time, for the price-trend chart. Chart one item (by itemId) to compare the
+        // same item across stores, or a whole category (by categoryId) to see e.g. every gas fill-up —
+        // useful when a category's purchases are split across several items (Premium/Regular fuel, etc.).
         group.MapGet("/item-price-history", async (
-            Guid itemId, DateOnly? from, DateOnly? to,
+            Guid? itemId, Guid? categoryId, DateOnly? from, DateOnly? to,
             ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
         {
             var householdId = user.GetHouseholdId();
-            var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(i => i.Id == itemId && i.HouseholdId == householdId, ct);
-            if (item is null)
+
+            // Resolve the label and the line-item filter for whichever dimension was asked for.
+            Guid labelId;
+            string label;
+            System.Linq.Expressions.Expression<Func<LineItem, bool>> lineFilter;
+            if (itemId is Guid iid)
             {
-                return Results.NotFound();
+                var item = await db.Items.AsNoTracking().FirstOrDefaultAsync(i => i.Id == iid && i.HouseholdId == householdId, ct);
+                if (item is null)
+                {
+                    return Results.NotFound();
+                }
+                labelId = item.Id;
+                label = item.FullName;
+                lineFilter = l => l.ItemId == iid;
+            }
+            else if (categoryId is Guid cid)
+            {
+                var category = await db.Categories.AsNoTracking().FirstOrDefaultAsync(c => c.Id == cid && c.HouseholdId == householdId, ct);
+                if (category is null)
+                {
+                    return Results.NotFound();
+                }
+                labelId = category.Id;
+                label = category.Name;
+                lineFilter = l => l.CategoryId == cid;
+            }
+            else
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["itemId"] = ["Provide an itemId or a categoryId."] });
             }
 
-            var query = from l in db.LineItems.AsNoTracking()
+            var query = from l in db.LineItems.AsNoTracking().Where(lineFilter)
                         join e in db.Expenses.AsNoTracking() on l.ExpenseId equals e.Id
-                        where l.ItemId == itemId && e.HouseholdId == householdId
+                        where e.HouseholdId == householdId
                         select new { l.UnitPrice, l.Amount, l.Quantity, e.Date, e.MerchantId };
             if (from is DateOnly f) query = query.Where(x => x.Date >= f);
             if (to is DateOnly t) query = query.Where(x => x.Date <= t);
@@ -167,7 +195,7 @@ public static class ReportEndpoints
                     merchants.GetValueOrDefault(r.MerchantId, "(unknown)")))
                 .ToList();
 
-            return Results.Ok(new ItemPriceHistoryResponse(item.Id, item.FullName, points));
+            return Results.Ok(new ItemPriceHistoryResponse(labelId, label, points));
         });
     }
 
