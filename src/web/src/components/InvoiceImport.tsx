@@ -346,6 +346,7 @@ export default function InvoiceImport({
           </select>
         </label>
       </div>
+      <p className="hint">This payment method applies to the whole bill — every item below is paid with it.</p>
 
       {current.result.grandTotal != null && Math.abs(includedSum - current.result.grandTotal) >= 0.01 && (
         <p className="hint">
@@ -354,7 +355,12 @@ export default function InvoiceImport({
         </p>
       )}
 
-      <h3>Items</h3>
+      <h3>
+        Items
+        {activeMethods.find((p) => p.id === paymentMethodId)?.label && (
+          <span className="hint"> · all paid with {activeMethods.find((p) => p.id === paymentMethodId)!.label}</span>
+        )}
+      </h3>
       {lines.map((line, i) => (
         <fieldset key={i} className={`line${line.possiblyDuplicate ? ' line-duplicate' : ''}`}>
           <div className="row">
