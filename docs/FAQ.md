@@ -534,6 +534,12 @@ dotnet list ExpensesApp.slnx package --vulnerable --include-transitive
 
 To fix a **transitive** vulnerable package, add a **direct** `<PackageReference>` to a patched version in the affected project — a direct reference overrides the version a dependency pulled in. We did exactly this for the crypto libraries: `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` were resolving to vulnerable 9.0.4 / 10.0.10 (GHSA-846f-f764-76mx, GHSA-r955-8q5j-3h83), so both `src/api/Expenses.Api.csproj` and `tests/api.tests/Expenses.Api.Tests.csproj` pin them to the patched **10.0.13**. Re-run the command above to confirm "no vulnerable packages", and remove the pins later once the parent packages (the Azure / DataProtection / test-host stack) reference patched versions themselves. Check for newer patches with `(Invoke-RestMethod "https://api.nuget.org/v3-flatcontainer/<package-id-lowercase>/index.json").versions`.
 
+### A deploy succeeded but the browser still shows the old app — why?
+
+The web app registers a **service worker** (`src/web/public/sw.js`) for offline/install support, so the browser can keep serving a cached build. New deploys use hashed asset filenames, so a fresh `index.html` points at the new files — but if the shell is served stale, you keep the old app. We hardened the SW so this propagates automatically: the app-shell navigation is fetched with `cache: 'no-store'` (always the latest `index.html`), the cache name is versioned (`home-expenses-vN`, bumped to purge the old shell on activate), and `main.tsx` reloads the tab once when a newly deployed worker takes control. Future deploys therefore update open tabs on their own.
+
+If a tab is still stuck on an old build (e.g. before this fix reached it), unstick it once: **DevTools → Application → Service workers → Unregister** (or **Application → Storage → Clear site data**), then reload. A plain Ctrl/Cmd-R may not be enough because the SW controls the page; unregistering or clearing site data guarantees a clean load.
+
 ### How do we avoid ever needing client secrets?
 
 Nothing in the design uses a secret, key, or password:
