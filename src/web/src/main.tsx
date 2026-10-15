@@ -15,6 +15,16 @@ createRoot(document.getElementById('root')!).render(
 
 // Register the service worker so the app is installable on the home screen and loads offline.
 if ('serviceWorker' in navigator) {
+  // When a newly deployed service worker takes control, reload once so the open tab picks up the new
+  // build instead of serving the previous one from cache. Only reload if a worker was already in control
+  // (so the very first visit, which has no prior controller, doesn't reload).
+  const hadController = !!navigator.serviceWorker.controller
+  let reloading = false
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return
+    reloading = true
+    window.location.reload()
+  })
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {})
   })

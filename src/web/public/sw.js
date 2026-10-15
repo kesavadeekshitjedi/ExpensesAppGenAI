@@ -1,7 +1,7 @@
 // Minimal, safe service worker: offline app shell + fast static-asset loads. It only ever touches
 // same-origin GET requests, so the cross-origin API (auth, expenses, receipts) is never intercepted
 // or cached — authentication and fresh data are unaffected.
-const CACHE = 'home-expenses-v1'
+const CACHE = 'home-expenses-v2'
 
 self.addEventListener('install', () => self.skipWaiting())
 
@@ -22,12 +22,14 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url)
   if (url.origin !== self.location.origin) return // leave the API (different origin) alone
 
-  // Navigations: network-first, falling back to the cached app shell when offline.
+  // Navigations: network-first, falling back to the cached app shell when offline. Use no-store so the
+  // shell always comes from the network (never the HTTP cache) — otherwise a stale index.html could keep
+  // pointing at old hashed asset filenames and the app would never pick up a new deploy.
   if (req.mode === 'navigate') {
     event.respondWith(
       (async () => {
         try {
-          const res = await fetch(req)
+          const res = await fetch(req, { cache: 'no-store' })
           const cache = await caches.open(CACHE)
           cache.put('/index.html', res.clone())
           return res
