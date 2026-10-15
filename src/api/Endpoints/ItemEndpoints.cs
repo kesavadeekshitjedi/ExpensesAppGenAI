@@ -18,6 +18,8 @@ public static class ItemEndpoints
         Guid? DefaultCategoryId, string? DefaultCategory,
         Guid? DefaultValueTagId, string? DefaultValueTag,
         bool HasPicture,
+        // When and how often it's been bought, for the item list. Null when it has no purchases yet.
+        DateOnly? LastPurchaseDate, int PurchaseCount, decimal? LastUnitPrice, decimal? LastAmount, string? LastMerchant,
         List<ReceiptDescriptionResponse> ReceiptDescriptions);
 
     // Desired editable state of an item: the web app shows the current values and submits them all.
@@ -258,20 +260,37 @@ public static class ItemEndpoints
             .Where(d => itemIds.Contains(d.ItemId))
             .ToListAsync(ct);
 
+        // Purchase history for these items (for the "last bought / N times" summary on each row).
+        var purchases = await (from l in db.LineItems.AsNoTracking()
+                               join e in db.Expenses.AsNoTracking() on l.ExpenseId equals e.Id
+                               where l.ItemId != null && itemIds.Contains(l.ItemId.Value) && e.HouseholdId == householdId
+                               select new { ItemId = l.ItemId!.Value, l.UnitPrice, l.Amount, e.Date, e.CreatedAt, e.MerchantId })
+                              .ToListAsync(ct);
+        var byItem = purchases.GroupBy(p => p.ItemId).ToDictionary(g => g.Key, g => g.ToList());
+
         string? Lookup(Dictionary<Guid, string> map, Guid? id) => id is Guid g && map.TryGetValue(g, out var v) ? v : null;
 
-        return items.Select(i => new ItemResponse(
-            i.Id,
-            i.FullName,
-            i.DefaultCategoryId,
-            Lookup(categories, i.DefaultCategoryId),
-            i.DefaultValueTagId,
-            Lookup(tags, i.DefaultValueTagId),
-            i.PictureBlobName is not null,
-            descriptions.Where(d => d.ItemId == i.Id)
-                .Select(d => new ReceiptDescriptionResponse(Lookup(merchants, d.MerchantId) ?? "(unknown)", d.PrintedDescription))
-                .OrderBy(r => r.Merchant)
-                .ToList()))
-            .ToList();
+        return items.Select(i =>
+        {
+            var history = byItem.GetValueOrDefault(i.Id);
+            var last = history?.OrderByDescending(p => p.Date).ThenByDescending(p => p.CreatedAt).FirstOrDefault();
+            return new ItemResponse(
+                i.Id,
+                i.FullName,
+                i.DefaultCategoryId,
+                Lookup(categories, i.DefaultCategoryId),
+                i.DefaultValueTagId,
+                Lookup(tags, i.DefaultValueTagId),
+                i.PictureBlobName is not null,
+                last?.Date,
+                history?.Count ?? 0,
+                last?.UnitPrice,
+                last?.Amount,
+                last is null ? null : Lookup(merchants, last.MerchantId),
+                descriptions.Where(d => d.ItemId == i.Id)
+                    .Select(d => new ReceiptDescriptionResponse(Lookup(merchants, d.MerchantId) ?? "(unknown)", d.PrintedDescription))
+                    .OrderBy(r => r.Merchant)
+                    .ToList());
+        }).ToList();
     }
 }

@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   getCategories,
   getItemPictureUrl,
+  getItemPriceHistory,
   getItems,
   mergeItems,
   updateItem,
   uploadItemPicture,
   type Category,
   type Item,
+  type ItemPriceHistory,
   type Me,
 } from '../api'
 
@@ -99,6 +101,16 @@ function ItemRow({
 }) {
   const [editing, setEditing] = useState(false)
   const [pictureUrl, setPictureUrl] = useState<string | null>(null)
+  const [history, setHistory] = useState<ItemPriceHistory | null>(null)
+  const [showHistory, setShowHistory] = useState(false)
+
+  const toggleHistory = () => {
+    const next = !showHistory
+    setShowHistory(next)
+    if (next && history === null) {
+      getItemPriceHistory(item.id).then(setHistory).catch(() => setHistory({ itemId: item.id, fullName: item.fullName, points: [] }))
+    }
+  }
 
   // Load (and later revoke) the picture object URL once the item has one.
   useEffect(() => {
@@ -123,6 +135,19 @@ function ItemRow({
             {item.defaultCategory ?? 'No default category'}
             {item.defaultValueTag && <> · {item.defaultValueTag}</>}
           </div>
+          <div className="hint">
+            {item.lastPurchaseDate ? (
+              <>
+                Last bought {item.lastPurchaseDate}
+                {item.lastAmount != null && <> for {item.lastAmount.toFixed(2)}</>}
+                {item.lastMerchant && <> at {item.lastMerchant}</>}
+                {' · '}
+                {item.purchaseCount} time{item.purchaseCount === 1 ? '' : 's'}
+              </>
+            ) : (
+              'Not purchased yet'
+            )}
+          </div>
           {item.receiptDescriptions.length > 0 && (
             <ul className="receipt-descs">
               {item.receiptDescriptions.map((d, i) => (
@@ -133,8 +158,46 @@ function ItemRow({
             </ul>
           )}
         </div>
-        {isParent && !editing && <button onClick={() => setEditing(true)}>Edit</button>}
+        <div className="item-actions">
+          {item.purchaseCount > 0 && (
+            <button onClick={toggleHistory}>{showHistory ? 'Hide history' : 'History'}</button>
+          )}
+          {isParent && !editing && <button onClick={() => setEditing(true)}>Edit</button>}
+        </div>
       </div>
+
+      {showHistory && (
+        <div className="item-history">
+          {history === null ? (
+            <p className="hint">Loading…</p>
+          ) : history.points.length === 0 ? (
+            <p className="hint">No dated purchases.</p>
+          ) : (
+            <table className="search-results">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Store</th>
+                  <th className="num">Qty</th>
+                  <th className="num">Unit price</th>
+                  <th className="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...history.points].reverse().map((p, i) => (
+                  <tr key={i}>
+                    <td>{p.date}</td>
+                    <td>{p.merchant}</td>
+                    <td className="num">{p.quantity}</td>
+                    <td className="num">{p.unitPrice > 0 ? p.unitPrice.toFixed(2) : '—'}</td>
+                    <td className="num">{p.amount.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {isParent && editing && (
         <EditItem

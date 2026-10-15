@@ -373,6 +373,11 @@ export type Item = {
   defaultValueTagId: string | null
   defaultValueTag: string | null
   hasPicture: boolean
+  lastPurchaseDate: string | null
+  purchaseCount: number
+  lastUnitPrice: number | null
+  lastAmount: number | null
+  lastMerchant: string | null
   receiptDescriptions: ReceiptDescription[]
 }
 

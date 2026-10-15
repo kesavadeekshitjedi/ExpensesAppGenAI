@@ -315,6 +315,14 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     now accepts `categoryId` (alternative to `itemId`) and returns every line in that category; the Reports
     picker gained a "Categories" optgroup, so choosing **Gas** plots all fill-ups (split by store, $/gal).
     83 API tests pass (added category-aggregation test); web lint/build clean.
+  - **Dates everywhere in the item database** (user: "where are the dates?" → all of the above):
+    - **Item list** now shows each item's **last-bought date**, amount, store, and **times bought** (`GET
+      /items` / `ItemResponse` gained `LastPurchaseDate`, `PurchaseCount`, `LastUnitPrice`, `LastAmount`,
+      `LastMerchant`, computed from the line-item/expense history).
+    - **Per-item dated history**: a **History** toggle on each item row shows a table of every purchase
+      (date, store, qty, unit price, amount), reusing `GET /reports/item-price-history?itemId=`.
+    - The **price-trend chart** dates are its X-axis (bottom); with the category fix above, picking a
+      category now yields multiple dated points. 83 API tests pass; web lint/build clean.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

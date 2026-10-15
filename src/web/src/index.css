@@ -659,6 +659,16 @@ fieldset.line {
   font-variant-numeric: tabular-nums;
 }
 
+/* Item row: action buttons stacked at the right, and the expandable dated history */
+.item-actions {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+}
+.item-history {
+  margin-top: 0.5rem;
+}
+
 /* Inline "add new category" control inside a category picker */
 .category-add {
   display: inline-flex;
