@@ -14,6 +14,7 @@ import {
   type ScanLine,
   type ScanResult,
 } from '../api'
+import CategorySelect from './CategorySelect'
 
 // A line being reviewed. Money/quantity are strings while editing. `itemName` is the item's full name
 // (prefilled when recognized); typing a name reuses an existing item or creates a new one on save.
@@ -40,11 +41,13 @@ export default function ReceiptScan({
   paymentMethods,
   members,
   onSaved,
+  onAddCategory,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
   members: Member[]
   onSaved: (expense: Expense) => void
+  onAddCategory: (name: string) => Promise<Category>
 }) {
   const activeCategories = categories.filter((c) => !c.archived)
   const activeMethods = paymentMethods.filter((p) => !p.archived)
@@ -54,7 +57,9 @@ export default function ReceiptScan({
   const [draft, setDraft] = useState<ScanResult | null>(null)
   const [merchant, setMerchant] = useState('')
   const [date, setDate] = useState('')
-  const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
+  const [paymentMethodId, setPaymentMethodId] = useState(
+    activeMethods.find((p) => p.isDefault)?.id ?? activeMethods[0]?.id ?? '',
+  )
   const [tax, setTax] = useState('')
   const [lines, setLines] = useState<ReviewLine[]>([])
   const [scanning, setScanning] = useState(false)
@@ -317,13 +322,12 @@ export default function ReceiptScan({
             </label>
             <label>
               Category
-              <select value={line.categoryId} onChange={(e) => updateLine(i, { categoryId: e.target.value })}>
-                {activeCategories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <CategorySelect
+                value={line.categoryId}
+                categories={activeCategories}
+                onAddCategory={onAddCategory}
+                onChange={(id) => updateLine(i, { categoryId: id })}
+              />
             </label>
             <label>
               For

@@ -27,6 +27,7 @@ export default function FindExpenses({
   itemSuggestions,
   onSaved,
   onDeleted,
+  onAddCategory,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
@@ -37,6 +38,7 @@ export default function FindExpenses({
   itemSuggestions: string[]
   onSaved: (expense: Expense) => void
   onDeleted: (id: string) => void
+  onAddCategory: (name: string) => Promise<Category>
 }) {
   const [q, setQ] = useState('')
   const [from, setFrom] = useState(daysAgo(30))
@@ -107,6 +109,7 @@ export default function FindExpenses({
           merchantSuggestions={merchantSuggestions}
           itemSuggestions={itemSuggestions}
           onSaved={handleSaved}
+          onAddCategory={onAddCategory}
           initial={selected}
           onDeleted={handleDeleted}
         />

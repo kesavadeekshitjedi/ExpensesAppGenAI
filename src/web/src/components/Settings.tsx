@@ -7,6 +7,7 @@ import {
   createPaymentMethod,
   createVehicle,
   setCategoryTaxable,
+  setDefaultPaymentMethod,
   getCategories,
   getPaymentMethods,
   getVehicles,
@@ -17,6 +18,7 @@ import {
   type PaymentMethodType,
   type Vehicle,
 } from '../api'
+import { guessTaxable } from '../taxable'
 
 export default function Settings({ me }: { me: Me }) {
   const [categories, setCategories] = useState<Category[]>([])
@@ -65,10 +67,14 @@ export default function Settings({ me }: { me: Me }) {
           {paymentMethods.map((p) => (
             <li key={p.id}>
               {p.label} — {p.type}
+              {p.isDefault && ' · ⭐ default'}
               {p.archived && ' (archived)'}
               {isParent && (
                 <>
                   {' '}
+                  {!p.isDefault && !p.archived && (
+                    <button onClick={() => setDefaultPaymentMethod(p.id).then(load)}>Make default</button>
+                  )}{' '}
                   <button onClick={() => archivePaymentMethod(p.id, !p.archived).then(load)}>
                     {p.archived ? 'Restore' : 'Archive'}
                   </button>
@@ -77,6 +83,9 @@ export default function Settings({ me }: { me: Me }) {
             </li>
           ))}
         </ul>
+        {isParent && (
+          <p className="hint">The ⭐ default payment method is pre-selected on new and imported expenses.</p>
+        )}
         {isParent && <AddPaymentMethod onAdded={load} />}
       </section>
 
@@ -157,7 +166,15 @@ function AddVehicle({ onAdded }: { onAdded: () => void }) {
 function AddCategory({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState('')
   const [isTaxable, setIsTaxable] = useState(true)
+  // Until the user ticks the box themselves, keep the suggestion in sync with the name (WA groceries
+  // are non-taxable). Once they override it, stop guessing.
+  const [touched, setTouched] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const changeName = (value: string) => {
+    setName(value)
+    if (!touched) setIsTaxable(guessTaxable(value))
+  }
 
   const submit = async () => {
     if (name.trim() === '') return
@@ -165,6 +182,7 @@ function AddCategory({ onAdded }: { onAdded: () => void }) {
     if (res.ok) {
       setName('')
       setIsTaxable(true)
+      setTouched(false)
       setError(null)
       onAdded()
     } else {
@@ -173,12 +191,26 @@ function AddCategory({ onAdded }: { onAdded: () => void }) {
   }
 
   return (
-    <div className="row">
-      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category" />
-      <label className="checkbox">
-        <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} /> Taxable
-      </label>
-      <button onClick={submit}>Add</button>
+    <div>
+      <div className="row">
+        <input value={name} onChange={(e) => changeName(e.target.value)} placeholder="New category" />
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={isTaxable}
+            onChange={(e) => {
+              setTouched(true)
+              setIsTaxable(e.target.checked)
+            }}
+          />{' '}
+          Taxable
+        </label>
+        <button onClick={submit}>Add</button>
+      </div>
+      <p className="hint">
+        Uncheck <strong>Taxable</strong> for non-taxable items like groceries and produce (not taxed in WA).
+        We guess from the name — adjust if needed.
+      </p>
       {error && <p role="alert">{error}</p>}
     </div>
   )

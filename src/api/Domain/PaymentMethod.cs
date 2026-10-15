@@ -11,5 +11,9 @@ public class PaymentMethod
 
     // Archived methods stay for historical expenses but are hidden from new-expense pickers.
     public bool Archived { get; set; }
+
+    // The household's default method, pre-selected on new/imported expenses. At most one is true.
+    public bool IsDefault { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 }

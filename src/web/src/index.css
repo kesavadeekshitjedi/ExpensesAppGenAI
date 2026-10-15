@@ -659,6 +659,17 @@ fieldset.line {
   font-variant-numeric: tabular-nums;
 }
 
+/* Inline "add new category" control inside a category picker */
+.category-add {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.category-add input {
+  min-width: 8rem;
+}
+
 /* Destructive action button (e.g. delete an expense) */
 button.danger {
   background: var(--bad-weak);

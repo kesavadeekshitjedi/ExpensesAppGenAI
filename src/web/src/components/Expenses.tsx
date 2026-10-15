@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  addCategory,
   getCategories,
   getExpenses,
   getItems,
@@ -54,6 +55,16 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
 
   const onDeleted = (id: string) => setExpenses((prev) => prev.filter((e) => e.id !== id))
 
+  // Create a category inline (from any line's category picker) and add it to the shared list, so it's
+  // immediately selectable everywhere. The API infers taxability from the name.
+  const handleAddCategory = async (name: string): Promise<Category> => {
+    const created = await addCategory(name)
+    setCategories((prev) =>
+      prev.some((c) => c.id === created.id) ? prev : [...prev, created].sort((a, b) => a.name.localeCompare(b.name)),
+    )
+    return created
+  }
+
   if (loading) return <p>Loading…</p>
 
   return (
@@ -85,6 +96,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               merchantSuggestions={merchantSuggestions}
               itemSuggestions={itemNames}
               onSaved={onSaved}
+              onAddCategory={handleAddCategory}
             />
           )}
           {entryMode === 'receipt' && (
@@ -93,6 +105,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               paymentMethods={paymentMethods}
               members={members}
               onSaved={onSaved}
+              onAddCategory={handleAddCategory}
             />
           )}
           {entryMode === 'invoice' && (
@@ -102,6 +115,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               members={members}
               vehicles={vehicles}
               onSaved={onSaved}
+              onAddCategory={handleAddCategory}
             />
           )}
           {entryMode === 'edit' && (
@@ -115,6 +129,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               itemSuggestions={itemNames}
               onSaved={onSaved}
               onDeleted={onDeleted}
+              onAddCategory={handleAddCategory}
             />
           )}
         </section>

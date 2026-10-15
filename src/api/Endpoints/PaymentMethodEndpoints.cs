@@ -8,9 +8,9 @@ namespace Expenses.Api.Endpoints;
 
 public static class PaymentMethodEndpoints
 {
-    public record PaymentMethodResponse(Guid Id, string Label, string Type, bool Archived);
+    public record PaymentMethodResponse(Guid Id, string Label, string Type, bool Archived, bool IsDefault);
     public record CreatePaymentMethodRequest(string Label, PaymentMethodType Type);
-    public record UpdatePaymentMethodRequest(string? Label, PaymentMethodType? Type, bool? Archived);
+    public record UpdatePaymentMethodRequest(string? Label, PaymentMethodType? Type, bool? Archived, bool? IsDefault);
 
     public static void MapPaymentMethodEndpoints(this IEndpointRouteBuilder app)
     {
@@ -40,7 +40,9 @@ public static class PaymentMethodEndpoints
                 return Results.Conflict(new { message = $"A payment method named \"{label}\" already exists." });
             }
 
-            var method = new PaymentMethod { Id = Guid.NewGuid(), HouseholdId = householdId, Label = label, Type = request.Type };
+            // The first payment method a household adds becomes its default automatically.
+            var isFirst = !await db.PaymentMethods.AnyAsync(p => p.HouseholdId == householdId, ct);
+            var method = new PaymentMethod { Id = Guid.NewGuid(), HouseholdId = householdId, Label = label, Type = request.Type, IsDefault = isFirst };
             db.PaymentMethods.Add(method);
             await db.SaveChangesAsync(ct);
             return Results.Created($"/payment-methods/{method.Id}", ToResponse(method));
@@ -79,10 +81,27 @@ public static class PaymentMethodEndpoints
                 method.Archived = archived;
             }
 
+            // Setting this one as default clears the flag on the household's other methods (at most one).
+            if (request.IsDefault is true)
+            {
+                var others = await db.PaymentMethods
+                    .Where(p => p.HouseholdId == householdId && p.Id != id && p.IsDefault)
+                    .ToListAsync(ct);
+                foreach (var other in others)
+                {
+                    other.IsDefault = false;
+                }
+                method.IsDefault = true;
+            }
+            else if (request.IsDefault is false)
+            {
+                method.IsDefault = false;
+            }
+
             await db.SaveChangesAsync(ct);
             return Results.Ok(ToResponse(method));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 
-    private static PaymentMethodResponse ToResponse(PaymentMethod p) => new(p.Id, p.Label, p.Type.ToString(), p.Archived);
+    private static PaymentMethodResponse ToResponse(PaymentMethod p) => new(p.Id, p.Label, p.Type.ToString(), p.Archived, p.IsDefault);
 }

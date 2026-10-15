@@ -48,7 +48,9 @@ public static class CategoryEndpoints
                 return Results.Conflict(new { message = $"A category named \"{name}\" already exists." });
             }
 
-            var category = new Category { Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, IsTaxable = request.IsTaxable ?? true };
+            // When the caller doesn't say, infer taxability from the name (WA groceries are non-taxable),
+            // so a category added on the fly during import gets a sensible default.
+            var category = new Category { Id = Guid.NewGuid(), HouseholdId = householdId, Name = name, IsTaxable = request.IsTaxable ?? GuessTaxable(name) };
             db.Categories.Add(category);
             await db.SaveChangesAsync(ct);
             return Results.Created($"/categories/{category.Id}", ToResponse(category));
@@ -92,6 +94,15 @@ public static class CategoryEndpoints
             return Results.Ok(ToResponse(category));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
+
+    // Food staples (names containing one of these hints) are treated as non-taxable, since Washington does
+    // not tax most groceries; everything else defaults to taxable. Kept in sync with the web's guessTaxable.
+    private static readonly string[] NonTaxableHints =
+        ["grocer", "produce", "vegetable", "veggie", "fruit", "dairy", "milk", "bread", "bakery",
+         "meat", "poultry", "seafood", "fish", "egg", "food", "pantry", "grain", "rice", "flour", "water"];
+
+    private static bool GuessTaxable(string name) =>
+        !NonTaxableHints.Any(h => name.Contains(h, StringComparison.OrdinalIgnoreCase));
 
     private static CategoryResponse ToResponse(Category c) => new(c.Id, c.Name, c.Archived, c.IsTaxable);
 }

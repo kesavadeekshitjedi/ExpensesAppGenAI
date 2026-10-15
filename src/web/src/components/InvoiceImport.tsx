@@ -12,6 +12,7 @@ import {
   type PaymentMethod,
   type Vehicle,
 } from '../api'
+import CategorySelect from './CategorySelect'
 
 // One invoice draft waiting to be reviewed (the parsed result plus the file it came from).
 type Draft = { fileName: string; result: ImportResult }
@@ -53,22 +54,29 @@ export default function InvoiceImport({
   members,
   vehicles,
   onSaved,
+  onAddCategory,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
   members: Member[]
   vehicles: Vehicle[]
   onSaved: (expense: Expense) => void
+  onAddCategory: (name: string) => Promise<Category>
 }) {
   const activeCategories = categories.filter((c) => !c.archived)
   const activeMethods = paymentMethods.filter((p) => !p.archived)
   const activeVehicles = vehicles.filter((v) => !v.archived)
   const firstCategoryId = activeCategories[0]?.id ?? ''
+  // The Vehicle picker only applies to fuel lines, so it's shown only when the line's category is gas.
+  const fuelCategoryIds = new Set(activeCategories.filter((c) => /gas|fuel/i.test(c.name)).map((c) => c.id))
+  const isFuel = (categoryId: string) => fuelCategoryIds.has(categoryId)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [index, setIndex] = useState(0)
-  const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
+  const [paymentMethodId, setPaymentMethodId] = useState(
+    activeMethods.find((p) => p.isDefault)?.id ?? activeMethods[0]?.id ?? '',
+  )
   const [merchant, setMerchant] = useState('')
   const [lines, setLines] = useState<ReviewLine[]>([])
   const [working, setWorking] = useState(false)
@@ -366,13 +374,12 @@ export default function InvoiceImport({
             </label>
             <label>
               Category
-              <select value={line.categoryId} onChange={(e) => updateLine(i, { categoryId: e.target.value })}>
-                {activeCategories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <CategorySelect
+                value={line.categoryId}
+                categories={activeCategories}
+                onAddCategory={onAddCategory}
+                onChange={(id) => updateLine(i, isFuel(id) ? { categoryId: id } : { categoryId: id, vehicleId: '' })}
+              />
             </label>
             <label>
               For
@@ -385,7 +392,7 @@ export default function InvoiceImport({
                 ))}
               </select>
             </label>
-            {activeVehicles.length > 0 && (
+            {activeVehicles.length > 0 && isFuel(line.categoryId) && (
               <label>
                 Vehicle
                 <select value={line.vehicleId} onChange={(e) => updateLine(i, { vehicleId: e.target.value })}>

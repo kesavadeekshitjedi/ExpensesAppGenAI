@@ -114,6 +114,7 @@ export type PaymentMethod = {
   label: string
   type: string
   archived: boolean
+  isDefault: boolean
 }
 
 export type Vehicle = {
@@ -320,6 +321,19 @@ export const getExpenses = () => getJson<Expense[]>('/expenses')
 export const createCategory = (name: string, isTaxable = true) =>
   apiFetch('/categories', { method: 'POST', body: JSON.stringify({ name, isTaxable }) })
 
+// Creates a category and returns it (used by the inline "Add new category" picker). Taxability is left to
+// the API to infer from the name (Washington groceries are non-taxable) unless explicitly provided.
+export async function addCategory(name: string, isTaxable?: boolean): Promise<Category> {
+  const res = await apiFetch('/categories', {
+    method: 'POST',
+    body: JSON.stringify(isTaxable === undefined ? { name } : { name, isTaxable }),
+  })
+  if (res.ok) return (await res.json()) as Category
+  const problem = (await res.json().catch(() => null)) as { message?: string; title?: string; errors?: Record<string, string[]> } | null
+  const firstError = problem?.errors ? Object.values(problem.errors)[0]?.[0] : undefined
+  throw new Error(problem?.message ?? firstError ?? problem?.title ?? 'Could not add the category.')
+}
+
 export const setCategoryTaxable = (id: string, isTaxable: boolean) =>
   apiFetch(`/categories/${id}`, { method: 'PATCH', body: JSON.stringify({ isTaxable }) })
 
@@ -331,6 +345,10 @@ export const archiveCategory = (id: string, archived: boolean) =>
 
 export const archivePaymentMethod = (id: string, archived: boolean) =>
   apiFetch(`/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ archived }) })
+
+// Marks a payment method as the household default (the API clears the flag on the others).
+export const setDefaultPaymentMethod = (id: string) =>
+  apiFetch(`/payment-methods/${id}`, { method: 'PATCH', body: JSON.stringify({ isDefault: true }) })
 
 export const getVehicles = () => getJson<Vehicle[]>('/vehicles')
 

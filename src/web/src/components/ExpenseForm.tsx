@@ -17,6 +17,7 @@ import {
   type PaymentMethod,
   type Vehicle,
 } from '../api'
+import CategorySelect from './CategorySelect'
 
 // The form keeps money/quantity fields as strings while typing (empty is allowed), then parses them
 // on submit. A line's `for` is a member id, or '' meaning Family (sent to the API as null).
@@ -148,6 +149,7 @@ export default function ExpenseForm({
   merchantSuggestions,
   itemSuggestions,
   onSaved,
+  onAddCategory,
   initial,
   onDeleted,
 }: {
@@ -159,6 +161,7 @@ export default function ExpenseForm({
   merchantSuggestions: string[]
   itemSuggestions: string[]
   onSaved: (expense: Expense) => void
+  onAddCategory: (name: string) => Promise<Category>
   // When `initial` is set the form edits that expense (updates it on save) instead of creating a new one.
   initial?: Expense
   onDeleted?: (id: string) => void
@@ -168,9 +171,13 @@ export default function ExpenseForm({
   const activeMethods = paymentMethods.filter((p) => !p.archived)
   const activeVehicles = vehicles.filter((v) => !v.archived)
   const firstCategoryId = activeCategories[0]?.id ?? ''
+  const defaultMethodId = activeMethods.find((p) => p.isDefault)?.id ?? activeMethods[0]?.id ?? ''
+  // The Vehicle picker only makes sense for fuel lines, so it's shown only when the line's category is gas.
+  const fuelCategoryIds = new Set(activeCategories.filter((c) => /gas|fuel/i.test(c.name)).map((c) => c.id))
+  const isFuel = (categoryId: string) => fuelCategoryIds.has(categoryId)
 
   const [merchant, setMerchant] = useState(initial?.merchant ?? '')
-  const [paymentMethodId, setPaymentMethodId] = useState(initial?.paymentMethodId ?? activeMethods[0]?.id ?? '')
+  const [paymentMethodId, setPaymentMethodId] = useState(initial?.paymentMethodId ?? defaultMethodId)
   const [date, setDate] = useState(initial?.date ?? today())
   const [tax, setTax] = useState(initial?.tax != null ? String(initial.tax) : '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
@@ -440,13 +447,12 @@ export default function ExpenseForm({
             </label>
             <label>
               Category
-              <select value={line.categoryId} onChange={(e) => updateLine(i, { categoryId: e.target.value })}>
-                {activeCategories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <CategorySelect
+                value={line.categoryId}
+                categories={activeCategories}
+                onAddCategory={onAddCategory}
+                onChange={(id) => updateLine(i, isFuel(id) ? { categoryId: id } : { categoryId: id, vehicleId: '' })}
+              />
             </label>
             <label>
               For
@@ -459,7 +465,7 @@ export default function ExpenseForm({
                 ))}
               </select>
             </label>
-            {activeVehicles.length > 0 && (
+            {activeVehicles.length > 0 && isFuel(line.categoryId) && (
               <label>
                 Vehicle
                 <select value={line.vehicleId} onChange={(e) => updateLine(i, { vehicleId: e.target.value })}>

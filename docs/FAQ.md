@@ -477,6 +477,12 @@ Why a deterministic text parser rather than the `prebuilt-invoice` model: the Am
 
 The import/scan reads the **card printed on the bill** and defaults the Payment-method picker to the matching household method (`PaymentMatching.Suggest`, returned as `suggestedPaymentMethodId`). It scores each payment method by the printed **last-4** (e.g. `…7039`) found in its label (+100), then by **brand** words shared with the bill — "Costco", "Citi", "Visa", "Discover", etc. (+10 each). So a Costco receipt that prints `COSTCO VISA … XXXX7039` defaults to a method you've labelled e.g. **"Costco Citi 7039"**. To make it reliable, **name your payment methods with the last-4** (Settings → payment methods), e.g. "Costco Citi 7039", "Amex 1005". You can always change the picked method before saving.
 
+When no card is detected, the form falls back to your **default payment method**. Set it in **Settings → Payment methods** with **Make default** (the ⭐ marks it); at most one is default, and the first method a household adds becomes the default automatically (`PaymentMethod.IsDefault`; `PATCH /payment-methods/{id}` with `isDefault:true` clears it from the others). The manual-entry and receipt-scan forms pre-select it too.
+
+### Can I add a category while reviewing an import, and how is "taxable" decided?
+
+Yes — every category dropdown (import, receipt scan, manual entry, Find & edit) has an **"➕ Add new category…"** option. Pick it, type the name (e.g. "Vegetables"), and it's created and selected in place (shared `CategorySelect` → `addCategory`). The API **infers taxability from the name** when you don't specify it (`POST /categories` → `GuessTaxable`): food/grocery names (produce, vegetable, fruit, dairy, meat, bread, …) are **non-taxable** (Washington doesn't tax groceries) and everything else is taxable. In **Settings**, adding a category auto-ticks the **Taxable** box from the name as you type — a hint, which you can override — and the same word list lives in the web's `taxable.ts`. The **Vehicle** picker on a line only appears when its category is **Gas/fuel**, so non-gas items (groceries, etc.) don't show it.
+
 ### I want reports that drill down to a single item and compare stores — does import support that?
 
 Yes. Because each line is saved as its own line item linked to an **Item** (via `ItemCatalog.ResolveFromReceiptAsync`, which runs for invoices and receipts alike) and to the **merchant/store** read off the bill, reports can slice both ways:

@@ -279,7 +279,23 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     `itemId`, so item history/price-trends stay intact). Added `DELETE /expenses/{id}` (Parent-only; removes
     the expense, its lines, and any receipt/invoice link) with a **Delete** button behind a confirm — for
     removing a bad import or a mistaken entry. This supersedes the earlier edit/delete deferral (SPEC #52).
-    80 API tests pass (search, delete, delete-as-child-forbidden); web lint/build clean. **Committed; not yet pushed.**
+    80 API tests pass (search, delete, delete-as-child-forbidden); web lint/build clean. Pushed `84aefe9`.
+  - **Category & payment UX polish (from a review of the import review screen):**
+    - **Inline "➕ Add new category…"** in every category picker (import, scan, manual, edit) via a shared
+      `CategorySelect` — type e.g. "Vegetables" and it's created and selected without leaving the form.
+    - **Taxability inferred from the name** (WA groceries aren't taxed): `POST /categories` guesses
+      `IsTaxable` when not given (`GuessTaxable`, mirrored in web `taxable.ts`); Settings' add-category now
+      auto-ticks the box from the name (overridable) with a hint. Inline-added categories use the guess.
+    - **Vehicle picker only shows for Gas/fuel lines** (category name contains "gas"/"fuel"); switching a
+      line off a fuel category clears its vehicle. (A vegetable line no longer shows a Vehicle dropdown.)
+    - **Default payment method**: `PaymentMethod.IsDefault` (migration `AddPaymentMethodDefault`, additive
+      bool); `PATCH /payment-methods/{id}` with `isDefault` sets it and clears the others (at most one); the
+      first method a household adds auto-defaults. Settings shows ⭐ default + "Make default"; the entry,
+      scan, and import forms pre-select the default (instead of the alphabetical first). A detected card on
+      an imported bill still wins over the default.
+    - 82 API tests pass (added `SettingsApiTests`: taxable inference, singular movable default); web
+      lint/build clean. **Pending:** a payment-per-item / "apply to all or selected" option on imports is
+      still an open question with the user (per-bill vs per-line).
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).
