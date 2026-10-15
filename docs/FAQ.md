@@ -524,6 +524,16 @@ No extra cost — it reuses the same **F0** Document Intelligence resource as re
 
 ## Security and secrets
 
+### What do I do about the "packages with vulnerabilities" warning (NU1902/NU1903)?
+
+The build (and Visual Studio's Solution Explorer banner) flags NuGet advisories on packages we use, including ones pulled in **transitively**. Find them with:
+
+```powershell
+dotnet list ExpensesApp.slnx package --vulnerable --include-transitive
+```
+
+To fix a **transitive** vulnerable package, add a **direct** `<PackageReference>` to a patched version in the affected project — a direct reference overrides the version a dependency pulled in. We did exactly this for the crypto libraries: `System.Security.Cryptography.Pkcs` and `System.Security.Cryptography.Xml` were resolving to vulnerable 9.0.4 / 10.0.10 (GHSA-846f-f764-76mx, GHSA-r955-8q5j-3h83), so both `src/api/Expenses.Api.csproj` and `tests/api.tests/Expenses.Api.Tests.csproj` pin them to the patched **10.0.13**. Re-run the command above to confirm "no vulnerable packages", and remove the pins later once the parent packages (the Azure / DataProtection / test-host stack) reference patched versions themselves. Check for newer patches with `(Invoke-RestMethod "https://api.nuget.org/v3-flatcontainer/<package-id-lowercase>/index.json").versions`.
+
 ### How do we avoid ever needing client secrets?
 
 Nothing in the design uses a secret, key, or password:

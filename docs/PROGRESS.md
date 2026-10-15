@@ -294,8 +294,17 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
       scan, and import forms pre-select the default (instead of the alphabetical first). A detected card on
       an imported bill still wins over the default.
     - 82 API tests pass (added `SettingsApiTests`: taxable inference, singular movable default); web
-      lint/build clean. **Pending:** a payment-per-item / "apply to all or selected" option on imports is
-      still an open question with the user (per-bill vs per-line).
+      lint/build clean.
+  - **Payment on imports = one card per bill** (user decision). Declined per-line payment / "apply to all or
+    selected"; instead clarified the import review (payment picker shows "all paid with <card>" next to Items
+    + a hint), so items aren't mistaken for needing their own card.
+  - **Critical bug — vulnerable NuGet packages (NU1902/NU1903).** The build and VS flagged high-severity
+    advisories in transitively-pulled crypto libraries: `System.Security.Cryptography.Pkcs` (9.0.4 in the API,
+    10.0.10 in tests — GHSA-846f-f764-76mx) and `System.Security.Cryptography.Xml` (10.0.10 in tests —
+    GHSA-r955-8q5j-3h83 et al.). **Fixed** by pinning direct references to the patched **10.0.13** in both
+    `src/api` and `tests/api.tests` (a direct reference overrides the vulnerable transitive version).
+    `dotnet list package --vulnerable --include-transitive` now reports **no vulnerable packages** and the
+    build is warning-free. Remove the pins once the parent packages reference the patched versions.
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

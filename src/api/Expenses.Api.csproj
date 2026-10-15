@@ -22,6 +22,12 @@
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
     <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
     <PackageReference Include="Microsoft.IdentityModel.Validators" Version="8.23.0" />
+
+    <!-- Security: pin patched crypto libraries so the vulnerable versions pulled in transitively (by the
+         Azure/DataProtection stack) are not used. Pkcs 9.0.4/10.0.10 -> GHSA-846f-f764-76mx (high);
+         Xml 10.0.10 -> GHSA-r955-8q5j-3h83 et al. (high). Remove once the parents reference the patched ones. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
   </ItemGroup>
 
 </Project>
