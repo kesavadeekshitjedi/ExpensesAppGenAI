@@ -33,6 +33,7 @@ public static class ReceiptEndpoints
         decimal LineSum,
         decimal Difference,
         ExpenseEndpoints.ExpenseMatch? PossibleMatch,
+        Guid? SuggestedPaymentMethodId,
         List<ScanLineResponse> Lines);
 
     public static void MapReceiptEndpoints(this IEndpointRouteBuilder app)
@@ -85,7 +86,7 @@ public static class ReceiptEndpoints
             catch (Exception)
             {
                 // The image is saved; let the user enter the lines by hand against this blob.
-                return Results.Ok(new ScanResponse(blobName, null, null, null, null, 0m, 0m, null, []));
+                return Results.Ok(new ScanResponse(blobName, null, null, null, null, 0m, 0m, null, null, []));
             }
 
             // Match printed lines against this merchant's known receipt descriptions, if the merchant
@@ -119,9 +120,17 @@ public static class ReceiptEndpoints
                 ? await ExpenseEndpoints.FindMatchAsync(db, householdId, md, mt, extracted.Merchant, ct)
                 : null;
 
+            // Suggest the payment method from the card printed on the receipt.
+            var paymentMethods = await db.PaymentMethods.AsNoTracking()
+                .Where(p => p.HouseholdId == householdId && !p.Archived)
+                .Select(p => new PaymentMatching.PaymentRef(p.Id, p.Label))
+                .ToListAsync(ct);
+            var suggestedPaymentMethodId = PaymentMatching.Suggest(paymentMethods, extracted.RawText);
+
             var difference = (extracted.Total ?? lineSum) - lineSum;
             return Results.Ok(new ScanResponse(
-                blobName, extracted.Merchant, extracted.Date, extracted.Total, extracted.Tax, lineSum, difference, possibleMatch, lines));
+                blobName, extracted.Merchant, extracted.Date, extracted.Total, extracted.Tax, lineSum, difference,
+                possibleMatch, suggestedPaymentMethodId, lines));
         }).RequireAuthorization(AppClaims.ParentPolicy);
     }
 

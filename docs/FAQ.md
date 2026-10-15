@@ -455,15 +455,33 @@ Document Intelligence and Blob Storage are Azure services, so locally (no `Docum
 
 ---
 
-## Invoice import (Amazon/Costco PDFs)
+## Invoice import (Amazon/Costco PDFs + receipt photos)
 
 ### How do I import Amazon/Costco invoices, and how does it work?
 
-Save the order's invoice as a **PDF** (from Amazon, "Order Summary" → print/save as PDF), then in **Expenses → Import invoice** pick one or more PDFs. For each file the API: stores the PDF, extracts its text with Document Intelligence (`prebuilt-read`), parses it with a vendor parser (`AmazonInvoiceParser` reads the order number, order-placed date, Grand Total, Estimated tax, and the item lines), checks for duplicates, and returns a draft. You review each draft (payment method, per-line item name / category / "for", include/exclude) and **Save** — nothing is written until you approve. Saving goes through `POST /expenses` with `Source="Invoice"`, which records an `ImportedInvoice` row (order identity) and builds the item database from the lines, exactly like receipts.
+Save the order's invoice as a **PDF** (from Amazon, "Order Summary" → print/save as PDF) or take a **photo/scan** of a receipt, then in **Expenses → Import invoice** pick one or more files (PDF **or** image — JPEG/PNG/WebP/GIF). For each file the API: stores it, turns it into a draft, checks for duplicates, and returns the draft. You review each (merchant, payment method, per-line item name / category / "for", include/exclude) and **Save** — nothing is written until you approve. Saving goes through `POST /expenses` with `Source="Invoice"`, which records an `ImportedInvoice` row and builds the item database from the lines, exactly like receipts.
+
+How a file becomes a draft (one pipeline, `InvoiceEndpoints`):
+- **PDFs** are read with Document Intelligence `prebuilt-read` and handed to the vendor text parsers (`AmazonInvoiceParser`, `CostcoReceiptParser`).
+- **Anything a text parser doesn't recognize — a Costco in-warehouse receipt, a grocery receipt photo, any other itemized bill — falls back to the structured `prebuilt-receipt` model** (`ToParsedInvoice`), which returns the merchant, date, total, tax, and **one line per item**. Images always use this path.
+
+Every recognized line becomes its **own line item under the one bill**, so reports can later drill down to the individual item (see "drill down" Q below).
 
 Why a deterministic text parser rather than the `prebuilt-invoice` model: the Amazon "Order Summary" format is highly consistent and text-based, so regex/positional parsing of the recognized text is more accurate for it (and free of the model's invoice-field guessing). `prebuilt-read` is used purely as the text extractor.
 
-**Costco** is supported too (`CostcoReceiptParser`): the sample receipts are gas receipts, parsed into a single **gas line** (gallons → quantity, price-per-gallon → unit price), with the **TranID#** as the dedup order number and the `Date:` (M/d/yy). Because it's gas, the import review includes a **Vehicle** picker so the fill-up is attributed to a car (feeds the per-vehicle reports). A gas line defaults its **category** to the household's gas category (the parser hints "Gas" and the endpoint maps it to a matching category) and its **vehicle** by fuel grade — household rule: **Premium → GLA 250, Regular → Honda** (in `InvoiceEndpoints.ResolveVehicleForFuel`; change the keywords there if the cars change). The import screen also lists every chosen file with a per-file progress bar as each is read. A non-gas Costco receipt falls back to a single line for the total that you split in review. The import endpoint tries each vendor parser (Amazon, then Costco) until one recognizes the text; the Amazon order-number format (`123-1234567-1234567`) and the Costco markers (`Total Sale` + `Costco`/`Kirkland Signature`) don't overlap.
+**Costco** is supported too (`CostcoReceiptParser`): the sample receipts are gas receipts, parsed into a single **gas line** (gallons → quantity, price-per-gallon → unit price), with the **TranID#** as the dedup order number and the `Date:` (M/d/yy). Because it's gas, the import review includes a **Vehicle** picker so the fill-up is attributed to a car (feeds the per-vehicle reports). A gas line defaults its **category** to the household's gas category (the parser hints "Gas" and the endpoint maps it to a matching category) and its **vehicle** by fuel grade — household rule: **Premium → GLA 250, Regular → Honda** (in `InvoiceEndpoints.ResolveVehicleForFuel`; change the keywords there if the cars change). The import screen also lists every chosen file with a per-file progress bar as each is read. The import endpoint tries each vendor parser (Amazon, then Costco gas) until one recognizes the text; the Amazon order-number format (`123-1234567-1234567`) and the Costco gas markers (`Total Sale` + `Costco`/`Kirkland Signature`) don't overlap.
+
+**Costco in-warehouse receipts** (the itemized store receipts, not gas) print `SUBTOTAL / TAX / TOTAL` with `E <code> <desc> <price>` item lines — there is no "Total Sale", so no text parser matches and they take the **`prebuilt-receipt` fallback**, which itemizes each product into its own line. (This was a bug: before the fallback they imported as vendor "Unknown" with no lines.)
+
+### How does it pick the payment method, and how do I set that up?
+
+The import/scan reads the **card printed on the bill** and defaults the Payment-method picker to the matching household method (`PaymentMatching.Suggest`, returned as `suggestedPaymentMethodId`). It scores each payment method by the printed **last-4** (e.g. `…7039`) found in its label (+100), then by **brand** words shared with the bill — "Costco", "Citi", "Visa", "Discover", etc. (+10 each). So a Costco receipt that prints `COSTCO VISA … XXXX7039` defaults to a method you've labelled e.g. **"Costco Citi 7039"**. To make it reliable, **name your payment methods with the last-4** (Settings → payment methods), e.g. "Costco Citi 7039", "Amex 1005". You can always change the picked method before saving.
+
+### I want reports that drill down to a single item and compare stores — does import support that?
+
+Yes. Because each line is saved as its own line item linked to an **Item** (via `ItemCatalog.ResolveFromReceiptAsync`, which runs for invoices and receipts alike) and to the **merchant/store** read off the bill, reports can slice both ways:
+- **Reports → By category** and **By item** break the period down to the category (e.g. "Vegetables") and the individual item (e.g. "Dosakai").
+- **Reports → Item price trend**: pick an item to see its price over time with **one line per store**, so you can tell which store is cheaper per month. (The store comes from the bill's merchant — editable in the review step if the OCR reads it wrong, so keep it accurate.)
 
 ### How does it detect a duplicate invoice (same order uploaded twice)?
 
@@ -490,7 +508,7 @@ PDFs under **Expenses → Import invoice**.
 
 ### Does invoice import cost anything, and where are the PDFs stored?
 
-No extra cost — it reuses the same **F0** Document Intelligence resource as receipts, and stores the PDFs in the existing `receipts` blob container (no new Azure resource, no infra change). `AmazonInvoiceParserTests` unit-test the parser against text mirroring the real samples, and `InvoiceApiTests` drive import → save → re-import with a stub reader to prove the dedup. Locally, with no `DocumentIntelligence:Endpoint`, import returns a clear "not configured" error (manual entry still works).
+No extra cost — it reuses the same **F0** Document Intelligence resource as receipts, and stores every file (PDF or image) in the existing `receipts` blob container (no new Azure resource, no infra change). A recognized PDF order uses one `prebuilt-read` page; an image or an unrecognized PDF (warehouse receipt) uses `prebuilt-receipt` instead — still well within the F0 500-pages/month free allowance for a family. `AmazonInvoiceParserTests`/`CostcoReceiptParserTests` unit-test the parsers, and `InvoiceApiTests` drive import → save → re-import with stub readers to prove dedup, image itemization, the warehouse fallback, and payment-method suggestion. Locally, with no `DocumentIntelligence:Endpoint`, import returns a clear "not configured" error (manual entry still works).
 
 ---
 

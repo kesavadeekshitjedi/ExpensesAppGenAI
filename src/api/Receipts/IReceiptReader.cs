@@ -14,7 +14,9 @@ public record ExtractedReceipt(
     DateOnly? Date,
     decimal? Total,
     decimal? Tax,
-    List<ExtractedLine> Lines);
+    List<ExtractedLine> Lines,
+    // Full recognized text of the document, used to detect which card it was paid with.
+    string? RawText = null);
 
 public record ExtractedLine(
     string Description,

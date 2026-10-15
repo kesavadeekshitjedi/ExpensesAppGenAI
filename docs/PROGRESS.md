@@ -1,6 +1,6 @@
 # Progress and Handoff Notes
 
-**Last updated:** 2026-10-09
+**Last updated:** 2026-10-14
 **Read this first** when picking the project back up. Then [SPEC.md](../SPEC.md) (what we're building and every decision) and [FAQ.md](FAQ.md) (how-tos and fixes already worked out).
 
 ---
@@ -247,6 +247,30 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     that replaces an expense's lines/tax/source and re-attaches the receipt/invoice — a scoped expense edit
     (full edit was deferred, SPEC #52). `onSaved` now replaces by id so an update doesn't double a row. 73
     API tests pass (added update-on-match coverage in `InvoiceApiTests`); web lint/build clean. **Unpushed.**
+- **2026-10-14**:
+  - **Image/receipt-photo import + warehouse-receipt fix (one change set).** The import flow now accepts
+    **images (JPEG/PNG/WebP/GIF)** as well as PDFs. Each bill is turned into a draft by one pipeline:
+    PDFs still try the vendor text parsers first (Amazon, Costco gas); **anything a text parser does not
+    recognize — a Costco warehouse receipt, a grocery receipt photo, any other itemized bill — falls back
+    to the structured `prebuilt-receipt` model**, which itemizes it into **one line per item** (so reports
+    drill down to the individual item). `ExtractedReceipt` gained `RawText`; `InvoiceEndpoints` gained an
+    image branch + a `ToParsedInvoice(ExtractedReceipt)` fallback; the import screen accepts
+    `image/*` and shows an **editable Merchant** field (defaulted from the read store name).
+    - **Bug fixed (logged):** Costco **in-warehouse** receipts imported as vendor "Unknown" / no lines.
+      Cause: `CostcoReceiptParser` only matched gas receipts (they print "Total Sale"); warehouse receipts
+      print "SUBTOTAL / TAX / TOTAL" with `E <code> <desc> <price>` items, so no parser matched. The
+      prebuilt-receipt fallback above now itemizes them.
+  - **Payment method auto-selected from the card on the bill.** New `PaymentMatching.Suggest` reads the
+    printed card (last-4 like `…7039`, brand like "Costco Visa") and picks the household payment method whose
+    label matches (last-4 first, then brand). Returned as `SuggestedPaymentMethodId` from both
+    `/invoices/import` and `/receipts/scan`; the import and scan screens default the Payment-method picker to
+    it. So a Costco receipt (`COSTCO VISA …7039`) defaults to e.g. a "Costco Citi 7039" method.
+  - **Reports: item price trend now splits by store.** The Item price-trend chart draws **one line per
+    merchant** (with a legend) so you can see which store is cheaper for an item over time — answering
+    "drill down to Vegetables → Dosakai, which store is cheaper per month" (store captured from the receipt
+    merchant; each line builds the item DB via `ResolveFromReceiptAsync`, already wired for invoices).
+  - 77 API tests pass (added image-itemization, warehouse fallback, and payment-suggestion tests); web
+    lint/build clean. **Committed; not yet pushed.**
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).

@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -200,14 +201,21 @@ function ItemPriceTrend({ from, to }: { from: string; to: string }) {
     }
   }, [itemId, from, to])
 
-  // Plot unit price when the item has one; otherwise fall back to the line amount.
-  const { data, key } = useMemo(() => {
+  // Plot one line per store so you can compare which merchant is cheaper over time. Unit price is used
+  // when the item has one; otherwise the line amount. Each date becomes a row with a column per store.
+  const { data, merchants, label } = useMemo(() => {
     const pts = history?.points ?? []
     const useUnit = pts.some((p) => p.unitPrice > 0)
-    return {
-      key: useUnit ? 'unitPrice' : 'amount',
-      data: pts.map((p) => ({ date: p.date, unitPrice: p.unitPrice, amount: p.amount, merchant: p.merchant })),
+    const value = (p: (typeof pts)[number]) => (useUnit ? p.unitPrice : p.amount)
+    const stores = [...new Set(pts.map((p) => p.merchant))].sort()
+    const byDate = new Map<string, Record<string, number | string>>()
+    for (const p of pts) {
+      const row = byDate.get(p.date) ?? { date: p.date }
+      row[p.merchant] = value(p)
+      byDate.set(p.date, row)
     }
+    const rows = [...byDate.values()].sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    return { data: rows, merchants: stores, label: useUnit ? 'Unit price' : 'Amount' }
   }, [history])
 
   return (
@@ -226,7 +234,7 @@ function ItemPriceTrend({ from, to }: { from: string; to: string }) {
       </label>
 
       {!itemId ? (
-        <p className="hint">Pick an item to see how its price changed over time.</p>
+        <p className="hint">Pick an item to see how its price changed over time, and which store is cheaper.</p>
       ) : data.length === 0 ? (
         <p className="hint">No price history for this item in the selected period.</p>
       ) : (
@@ -236,11 +244,24 @@ function ItemPriceTrend({ from, to }: { from: string; to: string }) {
             <XAxis dataKey="date" tickFormatter={(d) => formatPeriod(d, 'day')} tick={{ fill: AXIS, fontSize: 12 }} tickLine={false} axisLine={{ stroke: GRID }} />
             <YAxis tickFormatter={axisMoney} tick={{ fill: AXIS, fontSize: 12 }} tickLine={false} axisLine={false} width={48} domain={['auto', 'auto']} />
             <Tooltip
-              formatter={(v) => [money(Number(v)), key === 'unitPrice' ? 'Unit price' : 'Amount']}
+              formatter={(v, name) => [money(Number(v)), `${name} · ${label}`]}
               labelFormatter={(d) => String(d)}
               contentStyle={{ borderRadius: 8, border: '1px solid #8884', fontSize: 13 }}
             />
-            <Line type="monotone" dataKey={key} stroke={BRAND} strokeWidth={2} dot={{ r: 3, fill: BRAND }} activeDot={{ r: 5 }} />
+            {merchants.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+            {merchants.map((m, i) => (
+              <Line
+                key={m}
+                type="monotone"
+                dataKey={m}
+                name={m}
+                stroke={PALETTE[i % PALETTE.length]}
+                strokeWidth={2}
+                connectNulls
+                dot={{ r: 3, fill: PALETTE[i % PALETTE.length] }}
+                activeDot={{ r: 5 }}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       )}

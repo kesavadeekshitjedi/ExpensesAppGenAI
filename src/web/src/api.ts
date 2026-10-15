@@ -214,6 +214,7 @@ export type ScanResult = {
   lineSum: number
   difference: number
   possibleMatch: ExpenseMatch | null
+  suggestedPaymentMethodId: string | null
   lines: ScanLine[]
 }
 
@@ -268,10 +269,12 @@ export type ImportResult = {
   difference: number
   duplicate: InvoiceDuplicate | null
   possibleMatch: ExpenseMatch | null
+  suggestedPaymentMethodId: string | null
   lines: ImportLine[]
 }
 
-// Uploads an invoice PDF (multipart) and returns the parsed, dedup-checked draft for review.
+// Uploads a bill — an order PDF or a receipt image (multipart) — and returns the parsed, dedup-checked
+// draft for review.
 export async function importInvoice(file: File): Promise<ImportResult> {
   const body = new FormData()
   body.append('file', file)

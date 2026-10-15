@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Expenses.Api.Receipts;
 
 namespace Expenses.Api.Tests;
 
@@ -39,7 +40,7 @@ public class InvoiceApiTests
     private record MatchDto(Guid id, string merchant, DateOnly date, decimal total, string source, int lineCount);
     private record ImportResult(string invoiceBlobName, string contentHash, string vendor, string? orderNumber,
         DateOnly? date, decimal? subtotal, decimal? tax, decimal? grandTotal, decimal lineSum, decimal difference,
-        DuplicateInfo? duplicate, MatchDto? possibleMatch, List<ImportLine> lines);
+        DuplicateInfo? duplicate, MatchDto? possibleMatch, Guid? suggestedPaymentMethodId, List<ImportLine> lines);
 
     private static MultipartFormDataContent PdfForm(byte[] bytes)
     {
@@ -48,8 +49,18 @@ public class InvoiceApiTests
         return new MultipartFormDataContent { { file, "file", "order.pdf" } };
     }
 
+    private static MultipartFormDataContent JpgForm(byte[] bytes)
+    {
+        var file = new ByteArrayContent(bytes);
+        file.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        return new MultipartFormDataContent { { file, "file", "receipt.jpg" } };
+    }
+
     // A minimal valid PDF header ("%PDF-") plus arbitrary trailing bytes so IsPdf passes and the hash varies.
     private static byte[] FakePdf(string tail) => "%PDF-1.4\n"u8.ToArray().Concat(System.Text.Encoding.UTF8.GetBytes(tail)).ToArray();
+
+    // A JPEG magic-number header (0xFF 0xD8 0xFF) plus arbitrary trailing bytes so the image is accepted.
+    private static byte[] FakeJpg(string tail) => new byte[] { 0xFF, 0xD8, 0xFF }.Concat(System.Text.Encoding.UTF8.GetBytes(tail)).ToArray();
 
     [Fact]
     public async Task Import_ParsesAmazonOrderIntoDraft()
@@ -111,6 +122,80 @@ public class InvoiceApiTests
         Assert.Equal("Costco Premium Fuel", line.printedDescription);
         Assert.Equal(gasId, line.suggestedCategoryId);      // mapped the "Gas" hint to the household category
         Assert.Equal(glaId, line.suggestedVehicleId);       // premium fuel -> GLA 250
+    }
+
+    // A photographed grocery receipt (JPEG) is read by the structured receipt model and each printed line
+    // becomes its own draft line, so reports can later drill down to the individual item.
+    [Fact]
+    public async Task Import_ImageReceipt_ItemizesIntoSeparateLines()
+    {
+        var factory = new TestApiFactory();
+        await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        factory.Receipts.Result = new ExtractedReceipt(
+            "Swagath", new DateOnly(2026, 10, 14), 6.44m, 0m,
+            [
+                new ExtractedLine("Dosakai - lb", 0.73m, 2.99m, 2.18m),
+                new ExtractedLine("Banana Burro Green - lb", 1.86m, 2.29m, 4.26m),
+            ],
+            RawText: "Swagath RECEIPT Total $6.44");
+        var client = factory.CreateClient();
+
+        var draft = await (await client.PostAsync("/invoices/import", JpgForm(FakeJpg("a")))).Content.ReadFromJsonAsync<ImportResult>();
+
+        Assert.Equal("Swagath", draft!.vendor);
+        Assert.Equal(new DateOnly(2026, 10, 14), draft.date);
+        Assert.Equal(2, draft.lines.Count);
+        Assert.Equal("Dosakai - lb", draft.lines[0].printedDescription);
+        Assert.Equal(4.26m, draft.lines[1].amount);
+    }
+
+    // A Costco warehouse receipt PDF prints "SUBTOTAL/TAX/TOTAL" (not the gas-only "Total Sale"), so no
+    // text parser recognizes it; the import falls back to the structured receipt model to itemize it.
+    [Fact]
+    public async Task Import_UnrecognizedPdf_FallsBackToReceiptItemization()
+    {
+        var factory = new TestApiFactory();
+        await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        factory.Invoices.Text = "REDMOND #1225 Costco Wholesale SUBTOTAL 157.96 TAX 0.00 TOTAL 157.96";
+        factory.Receipts.Result = new ExtractedReceipt(
+            "Costco", new DateOnly(2026, 10, 4), 157.96m, 0m,
+            [
+                new ExtractedLine("KS ORG A2 4 C", 1m, 34.98m, 34.98m),
+                new ExtractedLine("BHUJIA MIX", 1m, 7.99m, 7.99m),
+                new ExtractedLine("ORG ASPARAGUS", 1m, 11.99m, 11.99m),
+            ],
+            RawText: "COSTCO WHOLESALE");
+        var client = factory.CreateClient();
+
+        var draft = await (await client.PostAsync("/invoices/import", PdfForm(FakePdf("warehouse")))).Content.ReadFromJsonAsync<ImportResult>();
+
+        Assert.Equal("Costco", draft!.vendor);
+        Assert.Equal(3, draft.lines.Count);
+        Assert.Null(draft.orderNumber); // warehouse receipts have no stable order id; dedup falls back to the file hash
+    }
+
+    private record PaymentMethodDto(Guid id, string label);
+
+    // The card printed on the bill selects the matching household payment method (by last-4 in its label).
+    [Fact]
+    public async Task Import_SuggestsPaymentMethodFromPrintedCard()
+    {
+        var factory = new TestApiFactory();
+        await factory.SeedBaselineAsync();
+        await using var _f = factory;
+        // A Costco gas receipt that prints the card: "COSTCO VISA ... XXXXXXXX7039".
+        factory.Invoices.Text = CostcoGasText + "\nVI Acct #XXXXXXXXXXXX7039\nCOSTCO VISA\n";
+        var client = factory.CreateClient();
+
+        await client.PostAsJsonAsync("/payment-methods", new { label = "Costco Citi 7039", type = "CreditCard" });
+        var costcoCardId = (await client.GetFromJsonAsync<List<PaymentMethodDto>>("/payment-methods"))!
+            .First(p => p.label == "Costco Citi 7039").id;
+
+        var draft = await (await client.PostAsync("/invoices/import", PdfForm(FakePdf("gascard")))).Content.ReadFromJsonAsync<ImportResult>();
+
+        Assert.Equal(costcoCardId, draft!.suggestedPaymentMethodId);
     }
 
     [Fact]

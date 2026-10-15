@@ -12,10 +12,11 @@ public sealed class DocumentIntelligenceReceiptReader(DocumentIntelligenceClient
         Operation<AnalyzeResult> operation = await client.AnalyzeDocumentAsync(
             WaitUntil.Completed, "prebuilt-receipt", image, ct);
 
+        var rawText = operation.Value.Content;
         var document = operation.Value.Documents.FirstOrDefault();
         if (document is null)
         {
-            return new ExtractedReceipt(null, null, null, null, []);
+            return new ExtractedReceipt(null, null, null, null, [], rawText);
         }
 
         var fields = document.Fields;
@@ -47,7 +48,8 @@ public sealed class DocumentIntelligenceReceiptReader(DocumentIntelligenceClient
             Date(Get(fields, "TransactionDate")),
             Money(Get(fields, "Total")),
             Money(Get(fields, "TotalTax")),
-            lines);
+            lines,
+            rawText);
     }
 
     private static DocumentField? Get(IReadOnlyDictionary<string, DocumentField> fields, string key) =>

@@ -100,6 +100,10 @@ export default function ReceiptScan({
       setMerchant(result.merchant ?? '')
       setDate(result.date ?? new Date().toISOString().slice(0, 10))
       setTax(result.tax != null ? String(result.tax) : '')
+      // Default the payment method to the card detected on the receipt, when it matches one we have.
+      if (result.suggestedPaymentMethodId && activeMethods.some((p) => p.id === result.suggestedPaymentMethodId)) {
+        setPaymentMethodId(result.suggestedPaymentMethodId)
+      }
       setLines(result.lines.map(toReviewLine))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not read that receipt.')

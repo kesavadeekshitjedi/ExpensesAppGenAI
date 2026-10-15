@@ -3,16 +3,21 @@ using System.Security.Cryptography;
 using Expenses.Api.Auth;
 using Expenses.Api.Data;
 using Expenses.Api.Invoices;
+using Expenses.Api.Receipts;
 using Expenses.Api.Storage;
 using Microsoft.EntityFrameworkCore;
 
 namespace Expenses.Api.Endpoints;
 
-// Invoice import (Amazon/Costco order files): a parent uploads an invoice PDF, the API stores it, reads
-// its text with Document Intelligence, and parses it into a draft to review. Dedup runs here so the same
-// order is not imported twice — by the vendor order number (stable across re-downloads) and by the file
-// content hash — and each line is flagged if an item with the same description was already recorded on
-// the same date. Nothing is written to the database here except the stored file; the reviewed draft is
+// Invoice/receipt import: a parent uploads a bill — a PDF (Amazon/Costco order) or a photo/scan (JPEG,
+// PNG, …) — the API stores it and turns it into a draft to review. PDFs are read with the prebuilt-read
+// model and handed to a vendor-specific text parser; anything a text parser does not recognize (a Costco
+// warehouse receipt, a grocery receipt photo, any other itemized bill) falls back to the structured
+// prebuilt-receipt model, which itemizes it. Every recognized line becomes its own line item under the
+// one bill, so reports can slice by individual item. Dedup runs here so the same bill is not imported
+// twice (by vendor order number when present, else by file content hash), each line is flagged if the
+// same item was already recorded on that date, and the payment method is suggested from the card printed
+// on the bill. Nothing is written to the database here except the stored file; the reviewed draft is
 // saved through POST /expenses with Source="Invoice".
 public static class InvoiceEndpoints
 {
@@ -52,6 +57,7 @@ public static class InvoiceEndpoints
         decimal Difference,
         DuplicateInfo? Duplicate,
         ExpenseEndpoints.ExpenseMatch? PossibleMatch,
+        Guid? SuggestedPaymentMethodId,
         List<ImportLineResponse> Lines);
 
     public static void MapInvoiceEndpoints(this IEndpointRouteBuilder app)
@@ -60,20 +66,20 @@ public static class InvoiceEndpoints
 
         group.MapPost("/import", async (
             HttpRequest http, ClaimsPrincipal user, ExpensesDbContext db,
-            IBlobStorage blobs, IInvoiceTextReader reader, IEnumerable<IInvoiceParser> parsers,
-            CancellationToken ct) =>
+            IBlobStorage blobs, IInvoiceTextReader reader, IReceiptReader receiptReader,
+            IEnumerable<IInvoiceParser> parsers, CancellationToken ct) =>
         {
             var householdId = user.GetHouseholdId();
             if (!http.HasFormContentType)
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload the invoice as multipart/form-data."] });
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload the bill as multipart/form-data."] });
             }
 
             var form = await http.ReadFormAsync(ct);
             var file = form.Files["file"] ?? form.Files.FirstOrDefault();
             if (file is null || file.Length == 0)
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Choose an invoice PDF to upload."] });
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Choose a PDF or image to upload."] });
             }
             if (file.Length > ImageValidation.MaxBytes)
             {
@@ -86,33 +92,57 @@ public static class InvoiceEndpoints
                 await incoming.CopyToAsync(buffer, ct);
             }
             var bytes = buffer.ToArray();
-            if (!IsPdf(bytes))
+            var isPdf = IsPdf(bytes);
+            var imageContentType = isPdf ? null : ImageValidation.SniffContentType(bytes.AsSpan(0, Math.Min(bytes.Length, 16)));
+            if (!isPdf && imageContentType is null)
             {
-                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Only PDF invoices are supported right now."] });
+                return Results.ValidationProblem(new Dictionary<string, string[]> { ["file"] = ["Upload a PDF or an image (JPEG, PNG, WebP, or GIF)."] });
             }
 
             var contentHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
             // Keep the original file (retained indefinitely, alongside receipts).
-            var blobName = $"{Guid.NewGuid()}.pdf";
+            var blobContentType = isPdf ? "application/pdf" : imageContentType!;
+            var blobName = $"{Guid.NewGuid()}{(isPdf ? ".pdf" : ImageValidation.ExtensionFor(imageContentType!))}";
             buffer.Position = 0;
-            await blobs.UploadAsync(BlobContainers.Receipts, blobName, buffer, "application/pdf", ct);
+            await blobs.UploadAsync(BlobContainers.Receipts, blobName, buffer, blobContentType, ct);
 
-            string text;
+            // Turn the file into a ParsedInvoice. PDFs go through a vendor-specific text parser first
+            // (Amazon, Costco gas); anything unrecognized — a Costco warehouse receipt, a grocery receipt
+            // photo, any other image — is itemized by the structured prebuilt-receipt model. paymentText
+            // is the recognized text used to guess which card paid for it.
+            ParsedInvoice? parsed;
+            string? paymentText;
             try
             {
-                text = await reader.ReadTextAsync(BinaryData.FromBytes(bytes), ct);
+                if (isPdf)
+                {
+                    var text = await reader.ReadTextAsync(BinaryData.FromBytes(bytes), ct);
+                    paymentText = text;
+                    parsed = parsers.Select(p => p.TryParse(text)).FirstOrDefault(r => r is not null);
+                    if (parsed is null)
+                    {
+                        var extracted = await receiptReader.AnalyzeAsync(BinaryData.FromBytes(bytes), ct);
+                        parsed = ToParsedInvoice(extracted);
+                        paymentText = extracted.RawText ?? text;
+                    }
+                }
+                else
+                {
+                    var extracted = await receiptReader.AnalyzeAsync(BinaryData.FromBytes(bytes), ct);
+                    parsed = ToParsedInvoice(extracted);
+                    paymentText = extracted.RawText;
+                }
             }
             catch (Exception)
             {
                 // The file is saved; let the user enter the lines by hand against this blob.
-                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, null, []));
+                return Results.Ok(EmptyDraft(blobName, contentHash));
             }
 
-            var parsed = parsers.Select(p => p.TryParse(text)).FirstOrDefault(r => r is not null);
             if (parsed is null)
             {
-                return Results.Ok(new ImportResponse(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, null, []));
+                return Results.Ok(EmptyDraft(blobName, contentHash));
             }
 
             // Invoice-level dedup: same order number (primary) or identical file bytes (secondary).
@@ -131,6 +161,10 @@ public static class InvoiceEndpoints
             var vehicles = await db.Vehicles.AsNoTracking()
                 .Where(v => v.HouseholdId == householdId && !v.Archived)
                 .Select(v => new NamedRef(v.Id, v.Name))
+                .ToListAsync(ct);
+            var paymentMethods = await db.PaymentMethods.AsNoTracking()
+                .Where(p => p.HouseholdId == householdId && !p.Archived)
+                .Select(p => new PaymentMatching.PaymentRef(p.Id, p.Label))
                 .ToListAsync(ct);
 
             var lines = new List<ImportLineResponse>();
@@ -165,11 +199,44 @@ public static class InvoiceEndpoints
                 ? await ExpenseEndpoints.FindMatchAsync(db, householdId, md, mt, parsed.Vendor, ct)
                 : null;
 
+            var suggestedPaymentMethodId = PaymentMatching.Suggest(paymentMethods, paymentText);
+
             var difference = (parsed.GrandTotal ?? lineSum) - lineSum;
             return Results.Ok(new ImportResponse(
                 blobName, contentHash, parsed.Vendor, parsed.OrderNumber, parsed.OrderDate,
-                parsed.Subtotal, parsed.Tax, parsed.GrandTotal, lineSum, difference, duplicate, possibleMatch, lines));
+                parsed.Subtotal, parsed.Tax, parsed.GrandTotal, lineSum, difference, duplicate, possibleMatch,
+                suggestedPaymentMethodId, lines));
         }).RequireAuthorization(AppClaims.ParentPolicy);
+    }
+
+    // A draft with no parsed data (the file is stored so the user can enter lines by hand against it).
+    private static ImportResponse EmptyDraft(string blobName, string contentHash) =>
+        new(blobName, contentHash, "Unknown", null, null, null, null, null, 0m, 0m, null, null, null, []);
+
+    // Converts a structured receipt extraction (prebuilt-receipt) into the same ParsedInvoice shape the
+    // text parsers produce, so one import pipeline handles order PDFs, warehouse receipts, and photos.
+    // Each extracted item becomes its own line. Returns null when nothing usable was read.
+    private static ParsedInvoice? ToParsedInvoice(ExtractedReceipt extracted)
+    {
+        var lines = new List<ParsedInvoiceLine>();
+        foreach (var l in extracted.Lines)
+        {
+            var quantity = l.Quantity is > 0 ? l.Quantity : null;
+            var amount = l.Amount ?? decimal.Round((quantity ?? 1m) * (l.UnitPrice ?? 0m), 2);
+            lines.Add(new ParsedInvoiceLine(l.Description, quantity, l.UnitPrice, amount));
+        }
+        if (string.IsNullOrWhiteSpace(extracted.Merchant) && lines.Count == 0)
+        {
+            return null;
+        }
+        return new ParsedInvoice(
+            string.IsNullOrWhiteSpace(extracted.Merchant) ? "Unknown" : extracted.Merchant.Trim(),
+            OrderNumber: null, // photos/warehouse receipts have no stable order id; dedup falls back to the file hash
+            OrderDate: extracted.Date,
+            Subtotal: null,
+            Tax: extracted.Tax,
+            GrandTotal: extracted.Total,
+            Lines: lines);
     }
 
     private static async Task<DuplicateInfo?> FindDuplicateAsync(

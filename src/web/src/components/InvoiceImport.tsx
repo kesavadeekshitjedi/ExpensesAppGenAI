@@ -69,6 +69,7 @@ export default function InvoiceImport({
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [index, setIndex] = useState(0)
   const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
+  const [merchant, setMerchant] = useState('')
   const [lines, setLines] = useState<ReviewLine[]>([])
   const [working, setWorking] = useState(false)
   const [fileStates, setFileStates] = useState<FileState[]>([])
@@ -94,7 +95,15 @@ export default function InvoiceImport({
 
   const showDraft = (list: Draft[], i: number) => {
     setIndex(i)
-    setLines(i < list.length ? toReviewLines(list[i].result) : [])
+    const draft = i < list.length ? list[i] : null
+    setLines(draft ? toReviewLines(draft.result) : [])
+    // "Unknown" means nothing was read for the vendor; leave the field blank for the user to fill in.
+    setMerchant(draft && draft.result.vendor !== 'Unknown' ? draft.result.vendor : '')
+    // Default the payment method to the card detected on the bill, when it matches one we have.
+    const suggested = draft?.result.suggestedPaymentMethodId
+    if (suggested && activeMethods.some((p) => p.id === suggested)) {
+      setPaymentMethodId(suggested)
+    }
     setError(null)
   }
 
@@ -119,7 +128,7 @@ export default function InvoiceImport({
           collected.push({
             fileName: chosen[i].name,
             // A failed read becomes an empty draft the user can fill in or skip.
-            result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, possibleMatch: null, lines: [] },
+            result: { invoiceBlobName: '', contentHash: '', vendor: 'Unknown', orderNumber: null, date: null, subtotal: null, tax: null, grandTotal: null, lineSum: 0, difference: 0, duplicate: null, possibleMatch: null, suggestedPaymentMethodId: null, lines: [] },
           })
           patch(i, 'error', err instanceof Error ? err.message : 'Could not read this file')
         }
@@ -157,6 +166,10 @@ export default function InvoiceImport({
 
   const buildPayload = (): NewExpense | null => {
     if (!current) return null
+    if (merchant.trim() === '') {
+      setError('Enter the merchant.')
+      return null
+    }
     if (paymentMethodId === '') {
       setError('Choose a payment method.')
       return null
@@ -181,7 +194,7 @@ export default function InvoiceImport({
       return null
     }
     return {
-      merchant: current.result.vendor === 'Unknown' ? 'Amazon' : current.result.vendor,
+      merchant: merchant.trim(),
       paymentMethodId,
       date: current.result.date,
       tax: current.result.tax,
@@ -232,7 +245,7 @@ export default function InvoiceImport({
         <input
           ref={fileInputRef}
           type="file"
-          accept="application/pdf"
+          accept="application/pdf,image/*"
           multiple
           hidden
           onChange={(e) => onPickFiles(e.target.files)}
@@ -240,7 +253,7 @@ export default function InvoiceImport({
         {!working && (
           <div className="row receipt-capture">
             <button type="button" onClick={() => fileInputRef.current?.click()}>
-              📄 Choose invoice PDFs
+              📄 Choose invoices or receipt photos
             </button>
           </div>
         )}
@@ -268,9 +281,9 @@ export default function InvoiceImport({
         {error && <p role="alert">{error}</p>}
         {!working && fileStates.length === 0 && (
           <p className="hint">
-            Pick one or more Amazon/Costco invoice PDFs. The app reads each order, checks it is not already
-            imported (by order number, even if the file was renamed), and shows a draft to review. Nothing is
-            saved until you approve it.
+            Pick one or more bills — Amazon/Costco invoice PDFs or photos/scans of receipts (JPEG, PNG…).
+            The app reads each one, itemizes it into separate lines, checks it is not already imported, and
+            shows a draft to review. Nothing is saved until you approve it.
           </p>
         )}
       </div>
@@ -310,6 +323,10 @@ export default function InvoiceImport({
       )}
 
       <div className="row">
+        <label className="grow">
+          Merchant
+          <input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. Costco" />
+        </label>
         <label>
           Payment method
           <select value={paymentMethodId} onChange={(e) => setPaymentMethodId(e.target.value)}>
