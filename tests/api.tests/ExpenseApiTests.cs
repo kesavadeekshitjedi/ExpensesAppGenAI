@@ -96,6 +96,62 @@ public class ExpenseApiTests
         Assert.Equal("Target", list![0].merchant);
     }
 
+    private record SearchRow(Guid expenseId, Guid lineItemId, string description, string? itemFullName,
+        string merchant, DateOnly date, decimal amount, string category, string source, string paymentMethod);
+
+    [Fact]
+    public async Task SearchExpenses_FindsByItemName_WithContext()
+    {
+        await using var factory = new TestApiFactory();
+        var (category, method) = await factory.SeedBaselineAsync();
+        var client = factory.CreateClient();
+        var today = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd");
+
+        await client.PostAsJsonAsync("/expenses", new ExpensePayload("Swagath", method.Id, today, null, null,
+        [
+            new LinePayload("Dosakai - lb", category.Id, null, 1, 2.18m, null, null, null, null),
+            new LinePayload("Bananas", category.Id, null, 1, 4.26m, null, null, null, null),
+        ]));
+
+        var rows = await client.GetFromJsonAsync<List<SearchRow>>("/expenses/search?q=dosakai");
+        var row = Assert.Single(rows!);
+        Assert.Equal("Swagath", row.merchant);
+        Assert.Equal(2.18m, row.amount);
+        Assert.Equal("Discover card", row.paymentMethod);
+        Assert.Equal("Groceries", row.category);
+    }
+
+    [Fact]
+    public async Task DeleteExpense_RemovesItAndItsLines()
+    {
+        await using var factory = new TestApiFactory();
+        var (category, method) = await factory.SeedBaselineAsync();
+        var client = factory.CreateClient();
+
+        var created = await (await client.PostAsJsonAsync("/expenses", new ExpensePayload("Target", method.Id, null, null, null,
+            [new LinePayload("Notebook", category.Id, null, 1, 4m, null, null, null, null)]))).Content.ReadFromJsonAsync<ExpenseDto>();
+
+        var del = await client.DeleteAsync($"/expenses/{created!.id}");
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+
+        Assert.Empty((await client.GetFromJsonAsync<List<ExpenseDto>>("/expenses"))!);
+        using var db = factory.NewDbContext();
+        Assert.Equal(0, await db.LineItems.CountAsync());
+    }
+
+    [Fact]
+    public async Task DeleteExpense_AsChild_IsForbidden()
+    {
+        await using var parentFactory = new TestApiFactory();
+        var (category, method) = await parentFactory.SeedBaselineAsync();
+        var created = await (await parentFactory.CreateClient().PostAsJsonAsync("/expenses", new ExpensePayload("Target", method.Id, null, null, null,
+            [new LinePayload("Notebook", category.Id, null, 1, 4m, null, null, null, null)]))).Content.ReadFromJsonAsync<ExpenseDto>();
+
+        parentFactory.Role = MemberRole.Child;
+        var del = await parentFactory.CreateClient().DeleteAsync($"/expenses/{created!.id}");
+        Assert.Equal(HttpStatusCode.Forbidden, del.StatusCode);
+    }
+
     private record ExpenseDto(Guid id, string merchant, decimal total, List<LineDto> lineItems);
     private record LineDto(string description, string category, string @for, decimal amount, string? valueTag, string? shortForm);
 }

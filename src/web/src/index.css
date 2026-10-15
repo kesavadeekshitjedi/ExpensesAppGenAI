@@ -633,3 +633,41 @@ fieldset.line {
   width: 3rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* Find & edit: search results table */
+.search-results {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+.search-results th,
+.search-results td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  border-top: 1px solid var(--border);
+}
+.search-results th {
+  border-top: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+.search-results .num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Destructive action button (e.g. delete an expense) */
+button.danger {
+  background: var(--bad-weak);
+  border-color: color-mix(in srgb, var(--bad) 40%, transparent);
+  color: var(--bad);
+  font-weight: 600;
+}
+button.danger:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fff;
+}

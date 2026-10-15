@@ -60,6 +60,59 @@ public static class ExpenseEndpoints
             return Results.Ok(await ToResponses(db, householdId, expenses, ct));
         });
 
+        // Search line items by item/description or merchant within a date range (defaults to the last 30
+        // days), so a wrong import or typo can be found and opened for editing. Whole household can read;
+        // each matching line is returned with the context needed to recognize it (date, amount, store).
+        group.MapGet("/search", async (
+            string? q, DateOnly? from, DateOnly? to,
+            ClaimsPrincipal user, ExpensesDbContext db, TimeProvider clock, CancellationToken ct) =>
+        {
+            var householdId = user.GetHouseholdId();
+            var today = DateOnly.FromDateTime(clock.GetUtcNow().LocalDateTime);
+            var start = from ?? today.AddDays(-30);
+            var end = to ?? today;
+
+            var expenses = await db.Expenses.AsNoTracking()
+                .Where(e => e.HouseholdId == householdId && e.Date >= start && e.Date <= end)
+                .Include(e => e.LineItems)
+                .ToListAsync(ct);
+
+            var merchants = await db.Merchants.AsNoTracking().Where(m => m.HouseholdId == householdId).ToDictionaryAsync(m => m.Id, m => m.Name, ct);
+            var methods = await db.PaymentMethods.AsNoTracking().Where(p => p.HouseholdId == householdId).ToDictionaryAsync(p => p.Id, p => p.Label, ct);
+            var categories = await db.Categories.AsNoTracking().Where(c => c.HouseholdId == householdId).ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+            var itemIds = expenses.SelectMany(e => e.LineItems).Where(l => l.ItemId != null).Select(l => l.ItemId!.Value).Distinct().ToList();
+            var itemNames = await db.Items.AsNoTracking().Where(i => itemIds.Contains(i.Id)).ToDictionaryAsync(i => i.Id, i => i.FullName, ct);
+
+            // Household data is small, so filter in memory across description / item name / merchant.
+            var term = q?.Trim();
+            bool Matches(LineItem l, Guid merchantId)
+            {
+                if (string.IsNullOrEmpty(term)) return true;
+                if (l.Description.Contains(term, StringComparison.OrdinalIgnoreCase)) return true;
+                if (l.ItemId is Guid iid && itemNames.TryGetValue(iid, out var fn) && fn.Contains(term, StringComparison.OrdinalIgnoreCase)) return true;
+                return merchants.TryGetValue(merchantId, out var mn) && mn.Contains(term, StringComparison.OrdinalIgnoreCase);
+            }
+
+            var rows = expenses
+                .SelectMany(e => e.LineItems.Select(l => new { e, l }))
+                .Where(x => Matches(x.l, x.e.MerchantId))
+                .OrderByDescending(x => x.e.Date).ThenByDescending(x => x.e.CreatedAt)
+                .Take(200)
+                .Select(x => new ExpenseSearchLine(
+                    x.e.Id,
+                    x.l.Id,
+                    x.l.Description,
+                    x.l.ItemId is Guid iid && itemNames.TryGetValue(iid, out var fn) ? fn : null,
+                    merchants.GetValueOrDefault(x.e.MerchantId, "(unknown)"),
+                    x.e.Date,
+                    x.l.Amount,
+                    categories.GetValueOrDefault(x.l.CategoryId, "(unknown)"),
+                    x.e.Source.ToString(),
+                    methods.GetValueOrDefault(x.e.PaymentMethodId, "(unknown)")))
+                .ToList();
+            return Results.Ok(rows);
+        });
+
         group.MapGet("/{id:guid}", async (Guid id, ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
         {
             var householdId = user.GetHouseholdId();
@@ -353,7 +406,31 @@ public static class ExpenseEndpoints
             var responses = await ToResponses(db, householdId, [reloaded], ct);
             return Results.Ok(responses[0]);
         }).RequireAuthorization(AppClaims.ParentPolicy);
+
+        // Delete an expense and everything attached to it (its line items, and any receipt/invoice link).
+        // Parent only. Used to remove a bad import or a mistaken entry. The stored receipt/invoice file in
+        // blob storage is left in place (cheap, retained) — only the database rows are removed.
+        group.MapDelete("/{id:guid}", async (Guid id, ClaimsPrincipal user, ExpensesDbContext db, CancellationToken ct) =>
+        {
+            var householdId = user.GetHouseholdId();
+            var expense = await db.Expenses.Include(e => e.LineItems)
+                .FirstOrDefaultAsync(e => e.Id == id && e.HouseholdId == householdId, ct);
+            if (expense is null)
+            {
+                return Results.NotFound();
+            }
+            db.LineItems.RemoveRange(expense.LineItems);
+            db.Receipts.RemoveRange(await db.Receipts.Where(r => r.ExpenseId == id).ToListAsync(ct));
+            db.ImportedInvoices.RemoveRange(await db.ImportedInvoices.Where(x => x.ExpenseId == id).ToListAsync(ct));
+            db.Expenses.Remove(expense);
+            await db.SaveChangesAsync(ct);
+            return Results.NoContent();
+        }).RequireAuthorization(AppClaims.ParentPolicy);
     }
+
+    public record ExpenseSearchLine(
+        Guid ExpenseId, Guid LineItemId, string Description, string? ItemFullName,
+        string Merchant, DateOnly Date, decimal Amount, string Category, string Source, string PaymentMethod);
 
     public record ExpenseMatch(Guid Id, string Merchant, DateOnly Date, decimal Total, string Source, int LineCount);
 

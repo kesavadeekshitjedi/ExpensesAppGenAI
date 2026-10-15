@@ -513,6 +513,41 @@ export async function replaceExpense(id: string, expense: NewExpense): Promise<E
   throw new Error(firstError ?? problem?.title ?? 'Could not update the expense.')
 }
 
+// One matching line from the expense search (an item on a bill), with the context to recognize it.
+export type ExpenseSearchLine = {
+  expenseId: string
+  lineItemId: string
+  description: string
+  itemFullName: string | null
+  merchant: string
+  date: string
+  amount: number
+  category: string
+  source: string
+  paymentMethod: string
+}
+
+// Searches line items by item/description or merchant within a date range (API defaults to last 30 days).
+export function searchExpenses(q: string, from?: string, to?: string): Promise<ExpenseSearchLine[]> {
+  const params = new URLSearchParams()
+  if (q.trim() !== '') params.set('q', q.trim())
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const query = params.toString()
+  return getJson<ExpenseSearchLine[]>(`/expenses/search${query ? `?${query}` : ''}`)
+}
+
+// Loads one expense with all its details (used to open it for editing).
+export const getExpense = (id: string) => getJson<Expense>(`/expenses/${id}`)
+
+// Deletes an expense and everything attached to it. Throws with the API's message on failure.
+export async function deleteExpense(id: string): Promise<void> {
+  const res = await apiFetch(`/expenses/${id}`, { method: 'DELETE' })
+  if (res.ok || res.status === 404) return
+  const problem = (await res.json().catch(() => null)) as { title?: string } | null
+  throw new Error(problem?.title ?? 'Could not delete the expense.')
+}
+
 // Finds an existing expense that looks like the same purchase (same date + total), or null.
 export async function findExpenseMatch(date: string, total: number, merchant?: string): Promise<ExpenseMatch | null> {
   const params = new URLSearchParams({ date, total: String(total) })

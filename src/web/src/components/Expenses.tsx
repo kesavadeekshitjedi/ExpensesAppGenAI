@@ -13,6 +13,7 @@ import {
   type Vehicle,
 } from '../api'
 import ExpenseForm from './ExpenseForm'
+import FindExpenses from './FindExpenses'
 import InvoiceImport from './InvoiceImport'
 import ReceiptScan from './ReceiptScan'
 
@@ -23,7 +24,7 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [itemNames, setItemNames] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
-  const [entryMode, setEntryMode] = useState<'manual' | 'receipt' | 'invoice'>('manual')
+  const [entryMode, setEntryMode] = useState<'manual' | 'receipt' | 'invoice' | 'edit'>('manual')
   const isParent = me.role === 'Parent'
 
   const load = useCallback(() => {
@@ -51,6 +52,8 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
   const onSaved = (saved: Expense) =>
     setExpenses((prev) => [saved, ...prev.filter((e) => e.id !== saved.id)])
 
+  const onDeleted = (id: string) => setExpenses((prev) => prev.filter((e) => e.id !== id))
+
   if (loading) return <p>Loading…</p>
 
   return (
@@ -67,6 +70,9 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
             </button>
             <button aria-pressed={entryMode === 'invoice'} onClick={() => setEntryMode('invoice')}>
               Import invoice
+            </button>
+            <button aria-pressed={entryMode === 'edit'} onClick={() => setEntryMode('edit')}>
+              Find &amp; edit
             </button>
           </div>
           {entryMode === 'manual' && (
@@ -96,6 +102,19 @@ export default function Expenses({ me, members }: { me: Me; members: Member[] })
               members={members}
               vehicles={vehicles}
               onSaved={onSaved}
+            />
+          )}
+          {entryMode === 'edit' && (
+            <FindExpenses
+              categories={categories}
+              paymentMethods={paymentMethods}
+              members={members}
+              vehicles={vehicles}
+              tagSuggestions={tagSuggestions}
+              merchantSuggestions={merchantSuggestions}
+              itemSuggestions={itemNames}
+              onSaved={onSaved}
+              onDeleted={onDeleted}
             />
           )}
         </section>

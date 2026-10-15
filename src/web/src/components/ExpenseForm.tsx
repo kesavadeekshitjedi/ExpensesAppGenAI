@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import {
   createExpense,
+  deleteExpense,
   findExpenseMatch,
   getFuelPrice,
   getItemLastPrice,
@@ -36,6 +37,7 @@ type LineDraft = {
   vehicleId: string // '' = not a per-vehicle cost
   valueTag: string
   notes: string
+  itemId: string | null // the existing item this line links to (edit mode), so the link is preserved
 }
 
 function emptyLine(categoryId: string, forMemberId: string): LineDraft {
@@ -50,7 +52,26 @@ function emptyLine(categoryId: string, forMemberId: string): LineDraft {
     vehicleId: '',
     valueTag: '',
     notes: '',
+    itemId: null,
   }
+}
+
+// Pre-fill the form's line drafts from an existing expense when editing. Amount is treated as authoritative
+// (recent = amount + unit price), so changing qty/unit recomputes the free field without clobbering amount.
+function linesFromExpense(e: Expense): LineDraft[] {
+  return e.lineItems.map((l) => ({
+    description: l.description,
+    categoryId: l.categoryId,
+    forMemberId: l.forMemberId ?? '',
+    quantity: String(l.quantity),
+    unitPrice: String(l.unitPrice),
+    amount: String(l.amount),
+    recent: ['amount', 'unitPrice'],
+    vehicleId: l.vehicleId ?? '',
+    valueTag: l.valueTag ?? '',
+    notes: l.notes ?? '',
+    itemId: l.itemId,
+  }))
 }
 
 // Re-solve a line after the user edits one money field. The edited field becomes the most-recent; the
@@ -127,6 +148,8 @@ export default function ExpenseForm({
   merchantSuggestions,
   itemSuggestions,
   onSaved,
+  initial,
+  onDeleted,
 }: {
   categories: Category[]
   paymentMethods: PaymentMethod[]
@@ -136,20 +159,24 @@ export default function ExpenseForm({
   merchantSuggestions: string[]
   itemSuggestions: string[]
   onSaved: (expense: Expense) => void
+  // When `initial` is set the form edits that expense (updates it on save) instead of creating a new one.
+  initial?: Expense
+  onDeleted?: (id: string) => void
 }) {
+  const isEdit = initial != null
   const activeCategories = categories.filter((c) => !c.archived)
   const activeMethods = paymentMethods.filter((p) => !p.archived)
   const activeVehicles = vehicles.filter((v) => !v.archived)
   const firstCategoryId = activeCategories[0]?.id ?? ''
 
-  const [merchant, setMerchant] = useState('')
-  const [paymentMethodId, setPaymentMethodId] = useState(activeMethods[0]?.id ?? '')
-  const [date, setDate] = useState(today())
-  const [tax, setTax] = useState('')
-  const [notes, setNotes] = useState('')
+  const [merchant, setMerchant] = useState(initial?.merchant ?? '')
+  const [paymentMethodId, setPaymentMethodId] = useState(initial?.paymentMethodId ?? activeMethods[0]?.id ?? '')
+  const [date, setDate] = useState(initial?.date ?? today())
+  const [tax, setTax] = useState(initial?.tax != null ? String(initial.tax) : '')
+  const [notes, setNotes] = useState(initial?.notes ?? '')
   // The default "for" pre-fills each new line; it can be changed per line (SPEC feature 2).
   const [defaultFor, setDefaultFor] = useState('')
-  const [lines, setLines] = useState<LineDraft[]>([emptyLine(firstCategoryId, '')])
+  const [lines, setLines] = useState<LineDraft[]>(initial ? linesFromExpense(initial) : [emptyLine(firstCategoryId, '')])
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   // WA tax-rate estimate helper.
@@ -238,6 +265,8 @@ export default function ExpenseForm({
         notes: l.notes.trim() === '' ? null : l.notes.trim(),
         shortForm: null, // let the API figure out the short form
         vehicleId: l.vehicleId === '' ? null : l.vehicleId,
+        // When editing, keep each line tied to its existing item so item history/reports stay intact.
+        itemId: isEdit ? l.itemId : undefined,
       }))
 
     if (merchant.trim() === '') {
@@ -260,10 +289,19 @@ export default function ExpenseForm({
       tax: parseMoney(tax),
       notes: notes.trim() === '' ? null : notes.trim(),
       lineItems,
+      // Editing preserves the original source (so an imported bill stays an import for its item linkage).
+      ...(isEdit ? { source: initial!.source } : {}),
     }
 
     setSaving(true)
     try {
+      // Editing updates this exact expense (no "is this a duplicate?" check — we chose it on purpose).
+      if (isEdit) {
+        const saved = await replaceExpense(initial!.id, payload)
+        onSaved(saved)
+        return
+      }
+
       // If this looks like an existing entry (same date + total), offer to update it, not duplicate it.
       const total = lineItems.reduce((sum, l) => sum + (l.amount ?? 0), 0)
       const match = await findExpenseMatch(date, total, merchant.trim())
@@ -287,6 +325,28 @@ export default function ExpenseForm({
       onSaved(saved)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save the expense.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const onDelete = async () => {
+    if (!initial || !onDeleted) return
+    if (
+      !window.confirm(
+        `Delete this ${initial.source.toLowerCase()} expense (${initial.merchant} ${initial.total.toFixed(2)} on ` +
+          `${initial.date})? This removes all of its items and can't be undone.`,
+      )
+    ) {
+      return
+    }
+    setError(null)
+    setSaving(true)
+    try {
+      await deleteExpense(initial.id)
+      onDeleted(initial.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the expense.')
     } finally {
       setSaving(false)
     }
@@ -476,14 +536,23 @@ export default function ExpenseForm({
       </div>
 
       {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={saving}>
-        {saving ? 'Saving…' : 'Save expense'}
-      </button>
-      <p className="hint">
-        Tip: type the full item name and the app figures out its receipt short form for you. Enter any
-        two of Qty / Unit price / Amount and the third fills in — e.g. for gas, total + price-per-gallon
-        gives the gallons.
-      </p>
+      <div className="row">
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving…' : isEdit ? 'Update expense' : 'Save expense'}
+        </button>
+        {isEdit && onDeleted && (
+          <button type="button" className="danger" onClick={onDelete} disabled={saving}>
+            Delete
+          </button>
+        )}
+      </div>
+      {!isEdit && (
+        <p className="hint">
+          Tip: type the full item name and the app figures out its receipt short form for you. Enter any
+          two of Qty / Unit price / Amount and the third fills in — e.g. for gas, total + price-per-gallon
+          gives the gallons.
+        </p>
+      )}
     </form>
   )
 }

@@ -44,7 +44,7 @@ Step 10 (item database — full) and Step 11 (receipt capture) — **built and t
 
 - Doc-only commits still trigger a full redeploy (CI→Deploy on every push to `main`). The "deploy only changed parts" item is still open (see pending decisions).
 - Google sign-in (action 2 above) is the only unfinished part of step 6.
-- Expense **edit/delete** endpoints are not built yet (only create/list/get). Add when editing is needed. Note receipt scans can leave an **orphan image blob** if the user abandons the draft (image is uploaded at scan time, before the expense is saved) — acceptable at this volume; a cleanup pass can be added later.
+- Expense **edit and delete are now built** (2026-10-14): `PUT /expenses/{id}` (full edit via the **Find & edit** tab) and `DELETE /expenses/{id}` (Parent-only), plus `GET /expenses/search`. Note receipt scans — and now editing/deleting an imported bill — can leave an **orphan image/PDF blob** (the file stays in blob storage though its `Receipt`/`ImportedInvoice` row is gone); acceptable at this volume, a cleanup pass can be added later.
 - **Item pictures are not resized** on the server (stored as-is, 10 MB cap). If this becomes a page-load/storage concern, add **SkiaSharp** (+ `SkiaSharp.NativeAssets.Linux`) — see SPEC #54 / FAQ for why not ImageSharp.
 
 ---
@@ -270,7 +270,16 @@ Live resource names and URLs: `az stack group show --name expenses-app --resourc
     "drill down to Vegetables → Dosakai, which store is cheaper per month" (store captured from the receipt
     merchant; each line builds the item DB via `ResolveFromReceiptAsync`, already wired for invoices).
   - 77 API tests pass (added image-itemization, warehouse fallback, and payment-suggestion tests); web
-    lint/build clean. **Committed; not yet pushed.**
+    lint/build clean. Pushed `de0c9ce`.
+  - **Find, edit & delete expenses.** New **Expenses → Find & edit** tab: `GET /expenses/search?q=&from=&to=`
+    (default last 30 days) searches line items by item name / printed description / store and returns each
+    match with date, amount, store, category, and payment method. Clicking **Edit** opens the full expense in
+    the existing entry form (reused with an `initial` prop — merchant, payment method/card, date, tax, all
+    lines) and **updates** it via `PUT /expenses/{id}` (preserving the original `source` and each line's
+    `itemId`, so item history/price-trends stay intact). Added `DELETE /expenses/{id}` (Parent-only; removes
+    the expense, its lines, and any receipt/invoice link) with a **Delete** button behind a confirm — for
+    removing a bad import or a mistaken entry. This supersedes the earlier edit/delete deferral (SPEC #52).
+    80 API tests pass (search, delete, delete-as-child-forbidden); web lint/build clean. **Committed; not yet pushed.**
   - Verified step 5 in production (Deploy `36746336438`); fixed the deploy DB steps (go-sqlcmd + retries) and confirmed GitHub runners pass the SQL firewall rule.
   - Built step 6 (Microsoft sign-in): API auth/sessions/endpoints (+7 tests), Key Vault/session infra, and the web MSAL UI.
   - Deployed step 6: re-ran bootstrap, ran Infrastructure apply (KV key, Crypto User, dataprotection container, env var), pushed, Deploy shipped API+web. Auth endpoints smoke-tested (401 as expected).
